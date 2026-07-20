@@ -134,8 +134,14 @@ tests/             Offline pytest suite with mocked HTTP behavior
 docs/              Task-focused guides and design notes
 examples/          Placeholder-only command and environment examples
 scripts/           Repository safety checks
+skills/runpod-vllm-deployer/          Portable Agent Skill
+.claude/skills/runpod-vllm-deployer/  Claude Code project skill
 .github/           Issue templates, pull request template, and dependency updates
 ```
+
+## AI agent skills
+
+The portable [Agent Skill](skills/runpod-vllm-deployer/SKILL.md) is available to agents that support the Agent Skills convention. Claude Code loads the repository-local [project skill](.claude/skills/runpod-vllm-deployer/SKILL.md). A local test keeps their substantive content synchronized.
 
 ## Testing
 
