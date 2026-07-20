@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible defect without sharing credentials or live resource IDs.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include API keys, bearer tokens, Pod IDs, private URLs, or sensitive inference content.
+  - type: input
+    id: version
+    attributes:
+      label: CLI version
+      description: Output from `runpod-vllm --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: Command
+      options: [plan, deploy, status, wait, smoke-test, destroy, list, other]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use placeholders for all identifiers and secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, Pod IDs, private URLs, and sensitive payloads.
+          required: true

@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a focused improvement to the CLI or documentation.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or safety gap should be addressed?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include expected CLI behavior and defaults.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: billing
+    attributes:
+      label: Resource impact
+      options:
+        - label: I described whether this could create, modify, or delete billable resources.
+          required: true
