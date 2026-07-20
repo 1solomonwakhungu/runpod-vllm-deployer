@@ -1,13 +1,9 @@
 # RunPod vLLM Deployer
 
-[![CI](https://github.com/1solomonwakhungu/runpod-vllm-deployer/actions/workflows/ci.yml/badge.svg)](https://github.com/1solomonwakhungu/runpod-vllm-deployer/actions/workflows/ci.yml)
-[![Security checks](https://github.com/1solomonwakhungu/runpod-vllm-deployer/actions/workflows/security.yml/badge.svg)](https://github.com/1solomonwakhungu/runpod-vllm-deployer/actions/workflows/security.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A safe, tested Python CLI for deploying and tearing down OpenAI-compatible vLLM servers on RunPod GPUs.
-
-> Safety promise: `plan` is fully offline, `deploy` and `destroy` require confirmation, credentials are redacted, and teardown state is written as soon as RunPod returns a Pod ID.
 
 GPU Pods are billable resources. Prices and availability change frequently. Review [RunPod's live GPU pricing](https://www.runpod.io/pricing) immediately before deploying.
 
@@ -138,7 +134,7 @@ tests/             Offline pytest suite with mocked HTTP behavior
 docs/              Task-focused guides and design notes
 examples/          Placeholder-only command and environment examples
 scripts/           Repository safety checks
-.github/           CI, security checks, templates, and dependency updates
+.github/           Issue templates, pull request template, and dependency updates
 ```
 
 ## Testing
