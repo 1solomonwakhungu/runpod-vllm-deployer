@@ -2,6 +2,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![skills.sh](https://skills.sh/b/1solomonwakhungu/runpod-vllm-deployer)](https://skills.sh/1solomonwakhungu/runpod-vllm-deployer)
 
 A safe, tested Python CLI for deploying and tearing down OpenAI-compatible vLLM servers on RunPod GPUs.
 
@@ -142,6 +143,14 @@ skills/runpod-vllm-deployer/          Portable Agent Skill
 ## AI agent skills
 
 The portable [Agent Skill](skills/runpod-vllm-deployer/SKILL.md) is available to agents that support the Agent Skills convention. Claude Code loads the repository-local [project skill](.claude/skills/runpod-vllm-deployer/SKILL.md). A local test keeps their substantive content synchronized.
+
+Install the portable skill with the [`skills` CLI](https://skills.sh/docs/cli):
+
+```bash
+npx skills add 1solomonwakhungu/runpod-vllm-deployer --skill runpod-vllm-deployer
+```
+
+This installs the agent instructions, not the Python package. Follow the [installation steps](#installation) before using the `runpod-vllm` command.
 
 ## Testing
 
