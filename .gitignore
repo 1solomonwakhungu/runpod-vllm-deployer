@@ -24,6 +24,7 @@ build/
 *.egg-info/
 
 # Editors and operating systems
+.firecrawl/
 .DS_Store
 .idea/
 .vscode/
