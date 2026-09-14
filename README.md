@@ -135,19 +135,19 @@ tests/             Offline pytest suite with mocked HTTP behavior
 docs/              Task-focused guides and design notes
 examples/          Placeholder-only command and environment examples
 scripts/           Repository safety checks
-skills/runpod-vllm-deployer/          Portable Agent Skill
-.claude/skills/runpod-vllm-deployer/  Claude Code project skill
+skills/runpod-vllm-gpu-deploy/          Portable Agent Skill
+.claude/skills/runpod-vllm-gpu-deploy/  Claude Code project skill
 .github/           Issue templates, pull request template, and dependency updates
 ```
 
 ## AI agent skills
 
-The portable [Agent Skill](skills/runpod-vllm-deployer/SKILL.md) is available to agents that support the Agent Skills convention. Claude Code loads the repository-local [project skill](.claude/skills/runpod-vllm-deployer/SKILL.md). A local test keeps their substantive content synchronized.
+The portable [Agent Skill](skills/runpod-vllm-gpu-deploy/SKILL.md) is available to agents that support the Agent Skills convention. Claude Code loads the repository-local [project skill](.claude/skills/runpod-vllm-gpu-deploy/SKILL.md). A local test keeps their substantive content synchronized.
 
 Install the portable skill with the [`skills` CLI](https://skills.sh/docs/cli):
 
 ```bash
-npx skills add 1solomonwakhungu/runpod-vllm-deployer --skill runpod-vllm-deployer
+npx skills add 1solomonwakhungu/runpod-vllm-deployer --skill runpod-vllm-gpu-deploy
 ```
 
 This installs the agent instructions, not the Python package. Follow the [installation steps](#installation) before using the `runpod-vllm` command.
