@@ -1,6 +1,6 @@
 ---
-name: runpod-vllm-deployer
-description: Operate the runpod-vllm-deployer CLI safely. Use when asked to install or validate this repository, plan a vLLM Pod offline, deploy an approved model to RunPod, list or inspect Pods, wait for readiness, smoke-test an OpenAI-compatible endpoint, recover a partial deployment, or tear down an exact Pod. Do not use for unrelated RunPod tooling or as authorization to create, mutate, or destroy live resources.
+name: runpod-vllm-gpu-deploy
+description: Deploys OpenAI-compatible vLLM servers on RunPod GPU pods using the runpod-vllm CLI. Use when asked to deploy vLLM on RunPod, spin up a GPU pod, serve an OpenAI-compatible LLM endpoint, plan a deployment offline, validate a deployment config, wait for pod readiness, smoke-test an inference endpoint, recover a partial deployment, or tear down a GPU pod. Do not use for unrelated RunPod tooling or as authorization to create, mutate, or destroy live resources.
 ---
 
 # RunPod vLLM Deployer

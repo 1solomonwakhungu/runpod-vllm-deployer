@@ -1,0 +1,13 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Deployment",
+      "description": "Deploy and operate OpenAI-compatible vLLM servers on RunPod GPU pods.",
+      "skills": [
+        "runpod-vllm-gpu-deploy"
+      ]
+    }
+  ]
+}

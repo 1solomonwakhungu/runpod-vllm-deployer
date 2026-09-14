@@ -10,8 +10,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_PATHS = (
-    ROOT / "skills/runpod-vllm-deployer/SKILL.md",
-    ROOT / ".claude/skills/runpod-vllm-deployer/SKILL.md",
+    ROOT / "skills/runpod-vllm-gpu-deploy/SKILL.md",
+    ROOT / ".claude/skills/runpod-vllm-gpu-deploy/SKILL.md",
 )
 EXPECTED_OPTIONS = {
     "plan": {
@@ -107,7 +107,7 @@ def test_skill_presence_frontmatter_and_body(path: Path) -> None:
     assert 0 < len(raw) < 100_000
     content = raw.decode("utf-8")
     metadata, body = parse_frontmatter(content)
-    assert metadata["name"] == "runpod-vllm-deployer"
+    assert metadata["name"] == "runpod-vllm-gpu-deploy"
     assert 0 < len(metadata["description"]) < 1024
     assert "Use when" in metadata["description"]
     assert "Do not use" in metadata["description"]
