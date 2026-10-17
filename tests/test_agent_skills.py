@@ -157,11 +157,6 @@ def test_documented_commands_match_live_help() -> None:
         assert expected_options <= set(re.findall(r"--[a-z][a-z0-9-]*", content))
 
 
-def test_repository_has_no_github_workflows() -> None:
-    workflow_dir = ROOT / ".github/workflows"
-    assert not workflow_dir.exists() or not any(workflow_dir.iterdir())
-
-
 def test_readme_keeps_removed_content_absent() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "actions/workflows" not in readme

@@ -137,7 +137,7 @@ examples/          Placeholder-only command and environment examples
 scripts/           Repository safety checks
 skills/runpod-vllm-gpu-deploy/          Portable Agent Skill
 .claude/skills/runpod-vllm-gpu-deploy/  Claude Code project skill
-.github/           Issue templates, pull request template, and dependency updates
+.github/           CI, release automation, templates, and dependency updates
 ```
 
 ## AI agent skills

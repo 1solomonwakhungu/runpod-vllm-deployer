@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "0a10e0d161016dc275568c07c9e2b79ce8200419",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "runpod-vllm-deployer",
+      "include-component-in-tag": false,
+      "extra-files": ["src/runpod_vllm/__init__.py"]
+    }
+  }
+}
