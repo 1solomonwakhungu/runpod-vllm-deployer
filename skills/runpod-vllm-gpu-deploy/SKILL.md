@@ -63,7 +63,7 @@ Place global options before the command:
 | `--state-path PATH` | Local teardown state; default `.runpod-vllm-state.json`. |
 | `--env-file PATH` | Optional selected file containing `RUNPOD_API_KEY` and `HF_TOKEN`. |
 | `--api-url TEXT` | RunPod REST base URL; default `https://rest.runpod.io/v1` for v1, `https://api.runpod.io/v2` for v2, or the URL recorded in state. |
-| `--api-version [v1\|v2]` | RunPod REST API version; default `v1` or the version recorded in state; env var `RUNPOD_API_VERSION`. |
+| `--api-version [v1\|v2]` | RunPod REST API version; default is the version recorded in state, else `v1` before 2026-11-15 and `v2` from that date; env var `RUNPOD_API_VERSION`. |
 | `--version` | Show the version and exit. |
 | `--help` | Show help and exit. |
 
@@ -121,13 +121,13 @@ runpod-vllm destroy --help
 
 ## RunPod REST API version
 
-RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on 2026-11-15. REST API v2 (`https://api.runpod.io/v2`) is the long-term surface. The CLI defaults to v1; v2 is opt-in.
+RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on 2026-11-15. REST API v2 (`https://api.runpod.io/v2`) is the long-term surface. The CLI defaults to v1 until 2026-11-15 and switches to v2 automatically on that date.
 
-- Use `--api-version v2` (a global option, placed before the command) or set `RUNPOD_API_VERSION=v2` when the user asks for v2 or when the current date is on or after 2026-11-15.
+- Use `--api-version v2` (a global option, placed before the command) or set `RUNPOD_API_VERSION=v2` when the user asks for v2 before 2026-11-15. From that date v2 is the default and no option is needed.
 - Run `plan` with the same `--api-version` before `deploy`; the v2 payload uses nested `gpu`, `image`, `disk`, `entrypoint`, `cloud`, and `mounts` fields.
 - With v2, `--volume-gb` must be `0` or at least `10`.
 - `deploy` records `api_version` in state. `status` and `destroy` reuse it unless `--api-version` is passed. State files without the field are v1 deployments.
-- After v1 retirement, inspect or destroy an older v1 deployment with `runpod-vllm --api-version v2 status` or `runpod-vllm --api-version v2 destroy`; the Pod ID is unchanged.
+- After v1 retirement, `status` and `destroy` move an older v1 deployment to v2 automatically; the Pod ID is unchanged. Do not pass `--api-version v1` after that date.
 - `--api-url` does not change the version. Pair a custom v2 URL with `--api-version v2`.
 
 ## Plan-first workflow

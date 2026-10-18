@@ -63,11 +63,11 @@ If every retry is rate limited, the command exits with code 6 and reports that t
 
 ## RunPod REST v1 calls fail after retirement
 
-RunPod retires REST API v1 on 2026-11-15. After that date v1 calls are expected to fail. Switch to v2:
+RunPod retires REST API v1 on 2026-11-15. After that date v1 calls are expected to fail. The CLI switches its default to v2 on that date, so this only affects runs that force v1 with `--api-version v1` or `RUNPOD_API_VERSION=v1`. Remove that setting, or switch to v2 explicitly:
 
 ```bash
 runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
 export RUNPOD_API_VERSION=v2
 ```
 
-A deployment created through v1 keeps `api_version: v1` in its state file. To inspect or destroy it after the retirement date, pass `--api-version v2` explicitly; the Pod ID is used unchanged. If v2 rejects a create request with HTTP 400 or 422, run `plan` with `--api-version v2` and compare the payload with [Configuration](configuration.md#runpod-rest-api-version). v2 requires `--volume-gb 0` or at least `10`.
+A deployment created through v1 keeps `api_version: v1` in its state file. From the retirement date, `status` and `destroy` use v2 for it automatically; the Pod ID is used unchanged. If v2 rejects a create request with HTTP 400 or 422, run `plan` with `--api-version v2` and compare the payload with [Configuration](configuration.md#runpod-rest-api-version). v2 requires `--volume-gb 0` or at least `10`.

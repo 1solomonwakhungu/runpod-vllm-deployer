@@ -47,7 +47,7 @@ Deletion state is removed only after the provider reports the Pod absent. This m
 
 ## API conventions
 
-The CLI supports two RunPod REST surfaces, selected with `--api-version` (default `v1`). RunPod retires v1 on 2026-11-15.
+The CLI supports two RunPod REST surfaces, selected with `--api-version`. The default is `v1` before 2026-11-15, when RunPod retires v1, and `v2` from that date.
 
 | | REST v1 | REST v2 |
 | --- | --- | --- |
