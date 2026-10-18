@@ -18,6 +18,7 @@ GPU Pods are billable resources. Prices and availability change frequently. Revi
 - Health and model readiness checks with bounded timeouts
 - Deterministic OpenAI-compatible smoke tests with optional bearer authentication
 - Idempotent deletion for missing or already-terminated Pods
+- Automatic retry with backoff when RunPod returns HTTP 429 rate-limit responses
 - Typed modules, mocked tests, strict linting, formatting, and type checking
 
 ## Architecture
