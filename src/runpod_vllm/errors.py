@@ -38,6 +38,14 @@ class ApiError(RunpodVllmError):
         self.status_code = status_code
 
 
+class RateLimitError(ApiError):
+    """RunPod kept answering HTTP 429 after the client exhausted its retries."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message, status_code=429)
+        self.retry_after = retry_after
+
+
 class ReadinessTimeout(RunpodVllmError):
     exit_code = ExitCode.TIMEOUT
 

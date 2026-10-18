@@ -52,3 +52,11 @@ If you no longer have that ID, use `runpod-vllm --env-file .env list`, identify 
 ## Deletion verification times out
 
 The CLI retains local state. Check `status`, review the RunPod console, and retry `destroy`. Do not delete the state file until the Pod is confirmed absent.
+
+## RunPod rate limit (HTTP 429)
+
+From 2026-10-27, RunPod limits each account across all public APIs to 180 requests per minute, 3,600 per hour, and 43,200 per day. When RunPod answers HTTP 429, the client waits and retries the request up to 5 times. It honors the `Retry-After` header (seconds or an HTTP date, capped at 60 seconds) and otherwise uses exponential backoff with full jitter, starting at 1 second and capped at 60 seconds. Retrying `create` is safe because a 429 means RunPod rejected the request without creating a Pod.
+
+GET and DELETE requests are also retried on HTTP 502, 503, and 504. Pod creation is not retried on those statuses, because the Pod may already exist; run `list` before trying again.
+
+If every retry is rate limited, the command exits with code 6 and reports that the RunPod rate limit was hit. Wait a few minutes, then check whether other scripts or tools share the same API key and are using up its quota.
