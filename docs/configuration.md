@@ -12,7 +12,7 @@ Global options must appear before the command:
 
 ## RunPod REST API version
 
-RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. REST API v2 (`https://api.runpod.io/v2`) replaces it. The CLI still defaults to v1 so existing workflows behave the same; v2 is opt-in:
+RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. REST API v2 (`https://api.runpod.io/v2`) replaces it. Until then the CLI defaults to v1 so current behavior is unchanged; from 2026-11-15 the default switches to v2 automatically, with no upgrade needed. To opt in to v2 earlier:
 
 ```bash
 runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B

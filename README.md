@@ -12,7 +12,7 @@ GPU Pods are billable resources. Prices and availability change frequently. Revi
 
 - Offline validation and redacted deployment plans
 - Explicit confirmation gates for billable creation and destructive teardown
-- RunPod REST v1 (default) and v2 (`--api-version v2`) Pod payloads with a pinned vLLM image default
+- RunPod REST v1 and v2 Pod payloads (v2 becomes the default automatically on 2026-11-15) with a pinned vLLM image default
 - A40, L40S, A100, H100, H200, and B200 GPU profiles
 - Atomic local state with restrictive permissions where the platform supports them
 - Health and model readiness checks with bounded timeouts
@@ -121,14 +121,14 @@ See [Configuration](docs/configuration.md) for the complete option reference and
 
 ### RunPod REST API v1 retirement
 
-RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. The CLI defaults to v1 so current behavior is unchanged. Opt in to REST API v2 (`https://api.runpod.io/v2`) with the global option or environment variable:
+RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. Until then the CLI defaults to v1 so current behavior is unchanged; from 2026-11-15 the default switches to v2 automatically, with no upgrade needed. To use v2 earlier, opt in to REST API v2 (`https://api.runpod.io/v2`) with the global option or environment variable:
 
 ```bash
 runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
 export RUNPOD_API_VERSION=v2
 ```
 
-`deploy` records the version in state, so `status` and `destroy` keep using the API the Pod was created with unless you pass `--api-version` explicitly. See [Configuration](docs/configuration.md#runpod-rest-api-version) for the field mapping.
+`deploy` records the version in state, so `status` and `destroy` keep using the API the Pod was created with unless you pass `--api-version` explicitly. From 2026-11-15, deployments recorded as v1 are moved to v2 automatically with the same Pod ID. See [Configuration](docs/configuration.md#runpod-rest-api-version) for the field mapping.
 
 ## Teardown
 

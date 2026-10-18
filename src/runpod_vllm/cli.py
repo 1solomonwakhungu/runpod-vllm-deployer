@@ -7,6 +7,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -17,16 +18,17 @@ from runpod_vllm.client import RunPodClient
 from runpod_vllm.config import (
     API_VERSION_ENV,
     DEFAULT_API_URLS,
-    DEFAULT_API_VERSION,
     DEFAULT_IMAGE,
     DEFAULT_STATE_PATH,
     V1_RETIREMENT_DATE,
     ApiVersion,
     DeploymentConfig,
     default_api_url,
+    default_api_version,
     get_secret,
     load_env_file,
     parse_env_pairs,
+    v1_retired,
 )
 from runpod_vllm.errors import ExitCode, RunpodVllmError, StateError
 from runpod_vllm.models import DeploymentState, normalize_pod
@@ -44,6 +46,10 @@ app = typer.Typer(
 )
 
 _POD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
+
+
+def _today() -> date:
+    return date.today()
 
 
 @dataclass(frozen=True)
@@ -67,14 +73,17 @@ class CliContext:
         """Resolve the API version and base URL.
 
         Explicit options win. Otherwise a recorded deployment keeps the version and URL
-        it was created with, and new work uses the default (v1) surface.
+        it was created with, and new work uses the date-based default (v1 until RunPod
+        retires it, v2 afterwards). After retirement, v1 deployments move to v2 with the
+        same Pod ID so they can still be inspected and destroyed.
         """
+        today = _today()
         if self.api_version is not None:
             version = self.api_version
-        elif state is not None:
+        elif state is not None and not (state.api_version is ApiVersion.V1 and v1_retired(today)):
             version = state.api_version
         else:
-            version = DEFAULT_API_VERSION
+            version = default_api_version(today)
         if self.api_url is not None:
             url = self.api_url
         elif state is not None and state.api_version is version:
@@ -126,8 +135,9 @@ def main(
         envvar=API_VERSION_ENV,
         case_sensitive=False,
         help=(
-            f"RunPod REST API version. Default {DEFAULT_API_VERSION.value}, or the version "
-            f"recorded in state. v1 is retired by RunPod on {V1_RETIREMENT_DATE}."
+            f"RunPod REST API version. Defaults to the version recorded in state, else v1 "
+            f"until RunPod retires it on {V1_RETIREMENT_DATE.isoformat()} and v2 after; "
+            "recorded v1 deployments also move to v2 then."
         ),
         show_default=False,
     ),
