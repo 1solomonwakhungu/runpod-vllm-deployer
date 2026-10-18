@@ -36,7 +36,7 @@ Use that recovery path immediately. The explicit Pod ID option exists for this f
 
 ## Deletion verification
 
-`destroy` sends `DELETE /pods/{podId}` and then reads the Pod until it is absent. A delete 404 or an already-absent Pod is successful and idempotent. If verification times out, local state remains so cleanup can be retried.
+`destroy` sends `DELETE /pods/{podId}` and then reads the Pod until it is absent (HTTP 404, or `TERMINATED` status under REST v2). A delete 404 or an already-absent Pod is successful and idempotent. If verification times out, local state remains so cleanup can be retried.
 
 Use `--verify-timeout SECONDS` and `--verify-interval SECONDS` only when provider propagation requires adjustment.
 
