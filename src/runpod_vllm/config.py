@@ -5,13 +5,35 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from runpod_vllm.errors import AuthenticationError, ConfigurationError
 
+
+class ApiVersion(StrEnum):
+    """RunPod REST API surface used for Pod lifecycle calls."""
+
+    V1 = "v1"
+    V2 = "v2"
+
+
 DEFAULT_IMAGE = "vllm/vllm-openai:v0.19.1"
-DEFAULT_API_URL = "https://rest.runpod.io/v1"
+DEFAULT_API_VERSION = ApiVersion.V1
+API_VERSION_ENV = "RUNPOD_API_VERSION"
+# RunPod retires REST API v1 on this date; see docs.runpod.io/api-reference-v2/migrate-from-v1.
+V1_RETIREMENT_DATE = "2026-11-15"
+DEFAULT_API_URLS: dict[ApiVersion, str] = {
+    ApiVersion.V1: "https://rest.runpod.io/v1",
+    ApiVersion.V2: "https://api.runpod.io/v2",
+}
+DEFAULT_API_URL = DEFAULT_API_URLS[DEFAULT_API_VERSION]
 DEFAULT_STATE_PATH = Path(".runpod-vllm-state.json")
+
+
+def default_api_url(version: ApiVersion) -> str:
+    return DEFAULT_API_URLS[version]
+
 
 GPU_PROFILES: dict[str, str] = {
     "A40": "NVIDIA A40",
