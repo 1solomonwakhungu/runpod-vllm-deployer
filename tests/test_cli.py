@@ -109,6 +109,7 @@ def test_deploy_success_saves_state_first(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     assert result.exit_code == 0, result.output
     assert "Pod created: pod123" in result.output
+    assert f"Next: runpod-vllm --state-path {state_path} wait" in result.output
     assert state_path.exists()
     assert FakeClient.created_payload is not None
 
@@ -128,7 +129,7 @@ def test_partial_deploy_failure_prints_exact_cleanup(
         ["--state-path", str(tmp_path / "state.json"), "deploy", "--model", "org/model", "--yes"],
     )
     assert result.exit_code == 8
-    assert "runpod-vllm destroy --pod-id pod123 --yes" in result.output
+    assert "runpod-vllm --api-version v1 destroy --pod-id pod123 --yes" in result.output
     assert "test-api-key" not in result.output
 
 
