@@ -52,3 +52,14 @@ If you no longer have that ID, use `runpod-vllm --env-file .env list`, identify 
 ## Deletion verification times out
 
 The CLI retains local state. Check `status`, review the RunPod console, and retry `destroy`. Do not delete the state file until the Pod is confirmed absent.
+
+## RunPod REST v1 calls fail after retirement
+
+RunPod retires REST API v1 on 2026-11-15. After that date v1 calls are expected to fail. Switch to v2:
+
+```bash
+runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
+export RUNPOD_API_VERSION=v2
+```
+
+A deployment created through v1 keeps `api_version: v1` in its state file. To inspect or destroy it after the retirement date, pass `--api-version v2` explicitly; the Pod ID is used unchanged. If v2 rejects a create request with HTTP 400 or 422, run `plan` with `--api-version v2` and compare the payload with [Configuration](configuration.md#runpod-rest-api-version). v2 requires `--volume-gb 0` or at least `10`.
