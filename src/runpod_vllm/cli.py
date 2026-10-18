@@ -494,13 +494,15 @@ def deploy(
         except StateError:
             typer.echo(
                 f"Critical: Pod {pod_id} was created but state could not be saved. "
-                f"Clean it up with: runpod-vllm destroy --pod-id {pod_id} --yes",
+                f"Clean it up with: runpod-vllm --api-version {target.version.value} "
+                f"destroy --pod-id {pod_id} --yes",
                 err=True,
             )
             raise
         typer.echo(f"Pod created: {pod_id}")
         typer.echo(f"Teardown state: {cli_context.state_path}")
-        typer.echo(f"Next: runpod-vllm wait --state-path {cli_context.state_path}")
+        # Global options must precede the subcommand.
+        typer.echo(f"Next: runpod-vllm --state-path {cli_context.state_path} wait")
     except RunpodVllmError as exc:
         _fail(exc)
 
