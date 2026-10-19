@@ -27,15 +27,15 @@ sequenceDiagram
     User->>CLI: plan options
     CLI-->>User: redacted payload, offline
     User->>CLI: deploy and confirm
-    CLI->>RunPod: POST /v1/pods
+    CLI->>RunPod: POST /pods (v1 or v2 base URL)
     RunPod-->>CLI: Pod ID
     CLI->>State: atomic save
     CLI-->>User: ID and next command
     User->>CLI: wait
     CLI->>vLLM: GET /health and /v1/models
     User->>CLI: destroy and confirm
-    CLI->>RunPod: DELETE /v1/pods/{id}
-    CLI->>RunPod: GET until 404
+    CLI->>RunPod: DELETE /pods/{id}
+    CLI->>RunPod: GET until 404 or TERMINATED
     CLI->>State: remove
 ```
 
@@ -47,4 +47,19 @@ Deletion state is removed only after the provider reports the Pod absent. This m
 
 ## API conventions
 
-Pod creation uses the RunPod REST fields `imageName`, `gpuTypeIds`, `gpuCount`, `minVCPUPerGPU`, `minRAMPerGPU`, `dockerEntrypoint`, `dockerStartCmd`, `ports`, `cloudType`, and optional `dataCenterIds`. Read and delete operations use `/v1/pods/{podId}`. The implementation intentionally avoids the legacy GraphQL path.
+The CLI supports two RunPod REST surfaces, selected with `--api-version`. The default is `v1` before 2026-11-15, when RunPod retires v1, and `v2` from that date.
+
+| | REST v1 | REST v2 |
+| --- | --- | --- |
+| Base URL | `https://rest.runpod.io/v1` | `https://api.runpod.io/v2` |
+| Create | `POST /pods` (flat body) | `POST /pods` (nested `CreatePodRequest`, 201) |
+| Read | `GET /pods/{id}`, status in `desiredStatus` | `GET /pods/{id}`, status in `status` |
+| List | `GET /pods?computeType=GPU`, bare array | `GET /pods`, `{"pods": [...], "pagination": {...}}` with cursor pages; CPU Pods filtered out client-side |
+| Delete | `DELETE /pods/{id}` | `DELETE /pods/{id}` (204) |
+| Errors | `{"message": ...}` | RFC 9457 `{"title", "status", "detail"}` |
+
+v1 create fields are `imageName`, `gpuTypeIds`, `gpuCount`, `minVCPUPerGPU`, `minRAMPerGPU`, `dockerEntrypoint`, `dockerStartCmd`, `ports`, `cloudType`, and optional `dataCenterIds`. The v2 mapping is in [Configuration](configuration.md#runpod-rest-api-version).
+
+Version differences stay in three places: `payload.build_pod_payload` builds the body for the selected version, `RunPodClient` unwraps the v2 list envelope and follows its cursor, and `models.normalize_pod` maps either Pod shape onto `PodInfo` (ID, name, status, GPU count). The rest of the CLI reads only `PodInfo`. Deletion verification treats a 404 or a `TERMINATED` status as absent, because v2 documents `TERMINATED` as permanently deleted.
+
+`deploy` records `api_version` and `api_url` in state so `status` and `destroy` use the surface the Pod was created with. The proxy URL `https://{podId}-{port}.proxy.runpod.net` is the same for both versions; the v2 Pod schema does not document a proxy URL field, so this is an assumption for v2. The implementation intentionally avoids the legacy GraphQL path.

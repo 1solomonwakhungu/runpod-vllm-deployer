@@ -7,6 +7,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -15,16 +16,22 @@ import typer
 from runpod_vllm import __version__
 from runpod_vllm.client import RunPodClient
 from runpod_vllm.config import (
-    DEFAULT_API_URL,
+    API_VERSION_ENV,
+    DEFAULT_API_URLS,
     DEFAULT_IMAGE,
     DEFAULT_STATE_PATH,
+    V1_RETIREMENT_DATE,
+    ApiVersion,
     DeploymentConfig,
+    default_api_url,
+    default_api_version,
     get_secret,
     load_env_file,
     parse_env_pairs,
+    v1_retired,
 )
 from runpod_vllm.errors import ExitCode, RunpodVllmError, StateError
-from runpod_vllm.models import DeploymentState
+from runpod_vllm.models import DeploymentState, normalize_pod
 from runpod_vllm.payload import build_pod_payload
 from runpod_vllm.readiness import smoke_test_endpoint, wait_until_ready
 from runpod_vllm.redaction import redact_deployment_plan
@@ -41,14 +48,52 @@ app = typer.Typer(
 _POD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
 
 
+def _today() -> date:
+    return date.today()
+
+
+@dataclass(frozen=True)
+class ApiTarget:
+    version: ApiVersion
+    url: str
+
+
 @dataclass(frozen=True)
 class CliContext:
     state_path: Path
     env_file: Path | None
-    api_url: str
+    # Explicit --api-url / --api-version (or RUNPOD_API_VERSION) values; None when unset.
+    api_url: str | None = None
+    api_version: ApiVersion | None = None
 
     def env_values(self) -> dict[str, str]:
         return load_env_file(self.env_file)
+
+    def api_target(self, state: DeploymentState | None = None) -> ApiTarget:
+        """Resolve the API version and base URL.
+
+        Explicit options win. Otherwise a recorded deployment keeps the version and URL
+        it was created with, and new work uses the date-based default (v1 until RunPod
+        retires it, v2 afterwards). After retirement, v1 deployments move to v2 with the
+        same Pod ID so they can still be inspected and destroyed.
+        """
+        today = _today()
+        if self.api_version is not None:
+            version = self.api_version
+        elif state is not None and not (state.api_version is ApiVersion.V1 and v1_retired(today)):
+            version = state.api_version
+        else:
+            version = default_api_version(today)
+        if self.api_url is not None:
+            url = self.api_url
+        elif state is not None and state.api_version is version:
+            url = state.api_url
+        else:
+            url = default_api_url(version)
+        return ApiTarget(version=version, url=url)
+
+    def client(self, api_key: str, target: ApiTarget) -> RunPodClient:
+        return RunPodClient(api_key, base_url=target.url, api_version=target.version)
 
 
 def _version_callback(value: bool) -> None:
@@ -74,7 +119,28 @@ def main(
         dir_okay=False,
         readable=True,
     ),
-    api_url: str = typer.Option(DEFAULT_API_URL, "--api-url", help="RunPod REST API base URL."),
+    api_url: str | None = typer.Option(
+        None,
+        "--api-url",
+        help=(
+            "RunPod REST API base URL. Defaults to "
+            f"{DEFAULT_API_URLS[ApiVersion.V1]} for v1 and {DEFAULT_API_URLS[ApiVersion.V2]} "
+            "for v2, or to the URL recorded in state."
+        ),
+        show_default=False,
+    ),
+    api_version: ApiVersion | None = typer.Option(
+        None,
+        "--api-version",
+        envvar=API_VERSION_ENV,
+        case_sensitive=False,
+        help=(
+            f"RunPod REST API version. Defaults to the version recorded in state, else v1 "
+            f"until RunPod retires it on {V1_RETIREMENT_DATE.isoformat()} and v2 after; "
+            "recorded v1 deployments also move to v2 then."
+        ),
+        show_default=False,
+    ),
     version: bool = typer.Option(
         False,
         "--version",
@@ -85,7 +151,9 @@ def main(
 ) -> None:
     """Configure paths shared by lifecycle commands."""
     del version
-    ctx.obj = CliContext(state_path=state_path, env_file=env_file, api_url=api_url)
+    ctx.obj = CliContext(
+        state_path=state_path, env_file=env_file, api_url=api_url, api_version=api_version
+    )
 
 
 def _context(ctx: typer.Context) -> CliContext:
@@ -93,6 +161,15 @@ def _context(ctx: typer.Context) -> CliContext:
     if not isinstance(value, CliContext):
         raise RuntimeError("CLI context was not initialized")
     return value
+
+
+def _pod_present(raw_pod: dict[str, Any] | None, api_version: ApiVersion) -> bool:
+    """A Pod is gone when the API returns 404 or reports it as TERMINATED.
+
+    The v2 PodStatus enum documents TERMINATED as "pod has been permanently deleted",
+    so a v2 GET may still return a terminated Pod instead of 404.
+    """
+    return raw_pod is not None and not normalize_pod(raw_pod, api_version).is_terminated
 
 
 def _fail(exc: RunpodVllmError) -> NoReturn:
@@ -293,10 +370,10 @@ def plan(
             port,
             environment,
         )
-        typer.echo("Deployment plan (offline; no API call)")
-        typer.echo(
-            json.dumps(redact_deployment_plan(build_pod_payload(config)), indent=2, sort_keys=True)
-        )
+        target = _context(ctx).api_target()
+        payload = build_pod_payload(config, target.version)
+        typer.echo(f"Deployment plan for RunPod REST {target.version.value} (offline; no API call)")
+        typer.echo(json.dumps(redact_deployment_plan(payload), indent=2, sort_keys=True))
     except RunpodVllmError as exc:
         _fail(exc)
 
@@ -397,8 +474,10 @@ def deploy(
             raise typer.Exit(code=int(ExitCode.USAGE))
         api_key = get_secret("RUNPOD_API_KEY", cli_context.env_values(), required=True)
         assert api_key is not None
-        with RunPodClient(api_key, base_url=cli_context.api_url) as client:
-            created = client.create_pod(build_pod_payload(config))
+        target = cli_context.api_target()
+        payload = build_pod_payload(config, target.version)
+        with cli_context.client(api_key, target) as client:
+            created = client.create_pod(payload)
         pod_id = created.get("id")
         if not isinstance(pod_id, str) or not _POD_ID_PATTERN.fullmatch(pod_id):
             raise StateError("RunPod created a Pod but did not return a valid Pod ID.")
@@ -407,20 +486,23 @@ def deploy(
             pod_name=str(created.get("name") or config.pod_name),
             model=config.model,
             port=config.port,
-            api_url=cli_context.api_url,
+            api_url=target.url,
+            api_version=target.version,
         )
         try:
             save_state(cli_context.state_path, state)
         except StateError:
             typer.echo(
                 f"Critical: Pod {pod_id} was created but state could not be saved. "
-                f"Clean it up with: runpod-vllm destroy --pod-id {pod_id} --yes",
+                f"Clean it up with: runpod-vllm --api-version {target.version.value} "
+                f"destroy --pod-id {pod_id} --yes",
                 err=True,
             )
             raise
         typer.echo(f"Pod created: {pod_id}")
         typer.echo(f"Teardown state: {cli_context.state_path}")
-        typer.echo(f"Next: runpod-vllm wait --state-path {cli_context.state_path}")
+        # Global options must precede the subcommand.
+        typer.echo(f"Next: runpod-vllm --state-path {cli_context.state_path} wait")
     except RunpodVllmError as exc:
         _fail(exc)
 
@@ -433,14 +515,17 @@ def status(ctx: typer.Context) -> None:
         state = load_state(cli_context.state_path)
         api_key = get_secret("RUNPOD_API_KEY", cli_context.env_values(), required=True)
         assert api_key is not None
-        with RunPodClient(api_key, base_url=cli_context.api_url) as client:
-            pod = client.get_pod(state.pod_id)
-        if pod is None:
+        target = cli_context.api_target(state)
+        with cli_context.client(api_key, target) as client:
+            raw_pod = client.get_pod(state.pod_id)
+        if raw_pod is None:
             typer.echo(f"Pod {state.pod_id}: absent")
             return
+        pod = normalize_pod(raw_pod, target.version)
         typer.echo(f"Pod: {state.pod_id}")
-        typer.echo(f"Name: {pod.get('name', state.pod_name)}")
-        typer.echo(f"State: {pod.get('desiredStatus', 'UNKNOWN')}")
+        typer.echo(f"Name: {pod.name or state.pod_name}")
+        typer.echo(f"State: {pod.status}")
+        typer.echo(f"API: RunPod REST {target.version.value}")
         typer.echo(f"Base URL: {state.proxy_url}")
         typer.echo(f"Health: {state.health_url}")
         typer.echo(f"Models: {state.models_url}")
@@ -545,10 +630,11 @@ def destroy(
             raise typer.Exit(code=int(ExitCode.USAGE))
         api_key = get_secret("RUNPOD_API_KEY", cli_context.env_values(), required=True)
         assert api_key is not None
-        with RunPodClient(api_key, base_url=cli_context.api_url) as client:
+        target = cli_context.api_target(state)
+        with cli_context.client(api_key, target) as client:
             requested = client.delete_pod(selected_id)
             deadline = time.monotonic() + verify_timeout
-            while client.get_pod(selected_id) is not None:
+            while _pod_present(client.get_pod(selected_id), target.version):
                 if time.monotonic() >= deadline:
                     raise StateError(
                         f"Pod {selected_id} is still present after {verify_timeout:.1f}s. "
@@ -572,20 +658,16 @@ def list_command(ctx: typer.Context) -> None:
     try:
         api_key = get_secret("RUNPOD_API_KEY", cli_context.env_values(), required=True)
         assert api_key is not None
-        with RunPodClient(api_key, base_url=cli_context.api_url) as client:
-            pods = client.list_pods()
-        active = [pod for pod in pods if pod.get("desiredStatus") != "TERMINATED"]
+        target = cli_context.api_target()
+        with cli_context.client(api_key, target) as client:
+            pods = [normalize_pod(raw, target.version) for raw in client.list_pods()]
+        active = [pod for pod in pods if not pod.is_terminated]
         if not active:
             typer.echo("No active GPU Pods found.")
             return
         typer.echo("ID\tSTATUS\tGPUS\tNAME")
         for pod in active:
-            gpu_value = pod.get("gpu")
-            gpu: dict[str, Any] = gpu_value if isinstance(gpu_value, dict) else {}
-            count = gpu.get("count", pod.get("gpuCount", "?"))
-            typer.echo(
-                f"{pod.get('id', '?')}\t{pod.get('desiredStatus', 'UNKNOWN')}\t"
-                f"{count}\t{pod.get('name', '')}"
-            )
+            count = "?" if pod.gpu_count is None else pod.gpu_count
+            typer.echo(f"{pod.pod_id or '?'}\t{pod.status}\t{count}\t{pod.name}")
     except RunpodVllmError as exc:
         _fail(exc)

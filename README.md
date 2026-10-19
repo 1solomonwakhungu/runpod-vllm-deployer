@@ -12,12 +12,13 @@ GPU Pods are billable resources. Prices and availability change frequently. Revi
 
 - Offline validation and redacted deployment plans
 - Explicit confirmation gates for billable creation and destructive teardown
-- Current RunPod REST Pod payloads with a pinned vLLM image default
+- RunPod REST v1 and v2 Pod payloads (v2 becomes the default automatically on 2026-11-15) with a pinned vLLM image default
 - A40, L40S, A100, H100, H200, and B200 GPU profiles
 - Atomic local state with restrictive permissions where the platform supports them
 - Health and model readiness checks with bounded timeouts
 - Deterministic OpenAI-compatible smoke tests with optional bearer authentication
 - Idempotent deletion for missing or already-terminated Pods
+- Automatic retry with backoff when RunPod returns HTTP 429 rate-limit responses
 - Typed modules, mocked tests, strict linting, formatting, and type checking
 
 ## Architecture
@@ -117,6 +118,17 @@ The default image is `vllm/vllm-openai:v0.19.1`, pinned because that exact image
 GPU sizing is approximate and model-specific. Check the checkpoint documentation, quantization format, context requirements, tensor parallel compatibility, and current RunPod inventory before creating a Pod. A profile name does not promise that a model will fit.
 
 See [Configuration](docs/configuration.md) for the complete option reference and [safe examples](examples/).
+
+### RunPod REST API v1 retirement
+
+RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. Until then the CLI defaults to v1 so current behavior is unchanged; from 2026-11-15 the default switches to v2 automatically, with no upgrade needed. To use v2 earlier, opt in to REST API v2 (`https://api.runpod.io/v2`) with the global option or environment variable:
+
+```bash
+runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
+export RUNPOD_API_VERSION=v2
+```
+
+`deploy` records the version in state, so `status` and `destroy` keep using the API the Pod was created with unless you pass `--api-version` explicitly. From 2026-11-15, deployments recorded as v1 are moved to v2 automatically with the same Pod ID. See [Configuration](docs/configuration.md#runpod-rest-api-version) for the field mapping.
 
 ## Teardown
 
