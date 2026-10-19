@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from runpod_vllm.cli import app
+from runpod_vllm.config import ApiVersion
 from runpod_vllm.errors import StateError
 from runpod_vllm.models import DeploymentState, ReadinessResult
 from runpod_vllm.state import save_state
@@ -24,9 +25,12 @@ class FakeClient:
     delete_result: ClassVar[bool] = True
     pods: ClassVar[list[dict[str, Any]]] = []
 
-    def __init__(self, api_key: str, *, base_url: str) -> None:
+    last_target: ClassVar[tuple[str, ApiVersion] | None] = None
+
+    def __init__(self, api_key: str, *, base_url: str, api_version: ApiVersion) -> None:
         assert api_key == "test-api-key"
         assert base_url.startswith("https://")
+        type(self).last_target = (base_url, api_version)
 
     def __enter__(self) -> FakeClient:
         return self
@@ -55,6 +59,7 @@ def reset_fake() -> None:
     FakeClient.pod = {"id": "pod123", "name": "test", "desiredStatus": "RUNNING"}
     FakeClient.delete_result = True
     FakeClient.pods = []
+    FakeClient.last_target = None
 
 
 def test_plan_is_offline_and_redacts_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,6 +109,7 @@ def test_deploy_success_saves_state_first(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     assert result.exit_code == 0, result.output
     assert "Pod created: pod123" in result.output
+    assert f"Next: runpod-vllm --state-path {state_path} wait" in result.output
     assert state_path.exists()
     assert FakeClient.created_payload is not None
 
@@ -123,7 +129,7 @@ def test_partial_deploy_failure_prints_exact_cleanup(
         ["--state-path", str(tmp_path / "state.json"), "deploy", "--model", "org/model", "--yes"],
     )
     assert result.exit_code == 8
-    assert "runpod-vllm destroy --pod-id pod123 --yes" in result.output
+    assert "runpod-vllm --api-version v1 destroy --pod-id pod123 --yes" in result.output
     assert "test-api-key" not in result.output
 
 

@@ -52,3 +52,22 @@ If you no longer have that ID, use `runpod-vllm --env-file .env list`, identify 
 ## Deletion verification times out
 
 The CLI retains local state. Check `status`, review the RunPod console, and retry `destroy`. Do not delete the state file until the Pod is confirmed absent.
+
+## RunPod rate limit (HTTP 429)
+
+From 2026-10-27, RunPod limits each account across all public APIs to 180 requests per minute, 3,600 per hour, and 43,200 per day. When RunPod answers HTTP 429, the client waits and retries the request up to 5 times. It honors the `Retry-After` header (seconds or an HTTP date, capped at 60 seconds) and otherwise uses exponential backoff with full jitter, starting at 1 second and capped at 60 seconds. Retrying `create` is safe because a 429 means RunPod rejected the request without creating a Pod.
+
+GET and DELETE requests are also retried on HTTP 502, 503, and 504. Pod creation is not retried on those statuses, because the Pod may already exist; run `list` before trying again.
+
+If every retry is rate limited, the command exits with code 6 and reports that the RunPod rate limit was hit. Wait a few minutes, then check whether other scripts or tools share the same API key and are using up its quota.
+
+## RunPod REST v1 calls fail after retirement
+
+RunPod retires REST API v1 on 2026-11-15. After that date v1 calls are expected to fail. The CLI switches its default to v2 on that date, so this only affects runs that force v1 with `--api-version v1` or `RUNPOD_API_VERSION=v1`. Remove that setting, or switch to v2 explicitly:
+
+```bash
+runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
+export RUNPOD_API_VERSION=v2
+```
+
+A deployment created through v1 keeps `api_version: v1` in its state file. From the retirement date, `status` and `destroy` use v2 for it automatically; the Pod ID is used unchanged. If v2 rejects a create request with HTTP 400 or 422, run `plan` with `--api-version v2` and compare the payload with [Configuration](configuration.md#runpod-rest-api-version). v2 requires `--volume-gb 0` or at least `10`.

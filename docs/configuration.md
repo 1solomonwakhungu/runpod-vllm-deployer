@@ -6,8 +6,41 @@ Global options must appear before the command:
 | --- | --- | --- |
 | `--state-path PATH` | `.runpod-vllm-state.json` | Select local teardown state |
 | `--env-file PATH` | None | Load secrets from a user-selected env file |
-| `--api-url TEXT` | `https://rest.runpod.io/v1` | Override the RunPod REST base URL |
+| `--api-url TEXT` | Version default, or the URL in state | Override the RunPod REST base URL |
+| `--api-version [v1\|v2]` | `v1`, or the version in state | Select the RunPod REST API version; also read from `RUNPOD_API_VERSION` |
 | `--version` | | Print the CLI version |
+
+## RunPod REST API version
+
+RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. REST API v2 (`https://api.runpod.io/v2`) replaces it. Until then the CLI defaults to v1 so current behavior is unchanged; from 2026-11-15 the default switches to v2 automatically, with no upgrade needed. To opt in to v2 earlier:
+
+```bash
+runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
+export RUNPOD_API_VERSION=v2   # applies to every later command in this shell
+```
+
+How the version and URL are chosen:
+
+1. An explicit `--api-version` (or `RUNPOD_API_VERSION`) wins. An explicit `--api-url` wins for the URL.
+2. Otherwise `status` and `destroy` reuse the `api_version` and `api_url` recorded in the state file by `deploy`. State files written before v2 support have no `api_version` and are read as v1.
+3. Otherwise the CLI uses v1 and `https://rest.runpod.io/v1`. Selecting v2 without `--api-url` uses `https://api.runpod.io/v2`.
+
+`--api-url` does not change the version. Pair a custom v2-compatible URL with `--api-version v2`.
+
+Both versions send `RUNPOD_API_KEY` as a Bearer token in the `Authorization` header. The v2 create body differs from v1:
+
+| Setting | v1 field | v2 field |
+| --- | --- | --- |
+| Image | `imageName` | `image` |
+| GPU type and count | `gpuTypeIds`, `gpuCount` | `gpu.id`, `gpu.count` |
+| Host vCPU and RAM minimums | `minVCPUPerGPU`, `minRAMPerGPU` | `gpu.minVcpuCountPerGpu`, `gpu.minRamPerGpu` |
+| Container disk | `containerDiskInGb` | `disk` |
+| Pod volume | `volumeInGb`, `volumeMountPath` | `mounts.persistent.size`, `mounts.persistent.path` |
+| Command | `dockerEntrypoint: []`, `dockerStartCmd` | `entrypoint` (full exec-form command) |
+| Cloud | `cloudType` | `cloud` |
+| Data centers | `dataCenterIds` with `dataCenterPriority: custom` | `dataCenterIds` (documented as preferred placement) |
+
+v2 rejects unknown fields, so the v1-only `computeType`, `gpuTypePriority`, `dataCenterPriority`, `interruptible`, and `supportPublicIp` are not sent. v2 requires `--volume-gb` to be `0` or at least `10`. Run `plan` with each version to compare the exact payloads.
 
 ## Deployment options
 
