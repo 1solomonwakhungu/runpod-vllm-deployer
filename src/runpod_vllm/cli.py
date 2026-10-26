@@ -177,12 +177,32 @@ def _fail(exc: RunpodVllmError) -> NoReturn:
     raise typer.Exit(code=int(exc.exit_code))
 
 
-def _warn_ambiguous_create() -> None:
-    """A failed create POST may still have created a billable Pod on RunPod."""
+def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> str:
+    """Global options that reproduce the API target that created the Pod.
+
+    Global options must precede the subcommand. The URL is included only when it
+    is not the built-in default for the version, so default targets stay readable.
+    """
+    parts = [f"--api-version {target.version.value}"]
+    if target.url != default_api_url(target.version):
+        parts.append(f"--api-url {target.url}")
+    return " ".join(parts)
+
+
+def _warn_possible_billable_pod(cli_context: CliContext, target: ApiTarget) -> None:
+    """A failed or unusable create response may still have created a billable Pod.
+
+    The cleanup guidance repeats the exact ``--api-version`` (and a non-default
+    ``--api-url``) that created the Pod, because listing or destroying through a
+    different API version than the create used can give false reassurance: v2 may
+    not see a Pod created through v1 and vice versa.
+    """
+    flags = _api_cleanup_flags(cli_context, target)
     typer.echo(
         "Critical: the Pod create request may have reached RunPod before failing, "
-        'so a billable Pod may exist. Run "runpod-vllm list" and destroy any '
-        "unexpected Pod by ID.",
+        "so a billable Pod may exist. Run "
+        f'"runpod-vllm {flags} list" and destroy any unexpected Pod by ID with '
+        f'"runpod-vllm {flags} destroy --pod-id <POD-ID> --yes".',
         err=True,
     )
 
@@ -491,16 +511,19 @@ def deploy(
                 created = client.create_pod(payload)
             except NetworkError:
                 # A timeout may still have reached RunPod and created a Pod.
-                _warn_ambiguous_create()
+                _warn_possible_billable_pod(cli_context, target)
                 raise
             except ApiError as exc:
-                # Gateway/ambiguity failures need a cleanup hint; 429 and other
-                # 4xx were rejected before RunPod acted on the request.
-                if exc.status_code is not None and exc.status_code >= 500:
-                    _warn_ambiguous_create()
+                # A 2xx response with an unusable body (status_code=None) and
+                # gateway failures are ambiguous; 429 and other 4xx were
+                # rejected before RunPod acted on the request.
+                if exc.status_code is None or exc.status_code >= 500:
+                    _warn_possible_billable_pod(cli_context, target)
                 raise
         pod_id = created.get("id")
         if not isinstance(pod_id, str) or not _POD_ID_PATTERN.fullmatch(pod_id):
+            # RunPod may have created the Pod even though the response is unusable.
+            _warn_possible_billable_pod(cli_context, target)
             raise StateError("RunPod created a Pod but did not return a valid Pod ID.")
         state = DeploymentState.create(
             pod_id=pod_id,
@@ -513,9 +536,10 @@ def deploy(
         try:
             save_state(cli_context.state_path, state)
         except StateError:
+            flags = _api_cleanup_flags(cli_context, target)
             typer.echo(
                 f"Critical: Pod {pod_id} was created but state could not be saved. "
-                f"Clean it up with: runpod-vllm --api-version {target.version.value} "
+                f"Clean it up with: runpod-vllm {flags} "
                 f"destroy --pod-id {pod_id} --yes",
                 err=True,
             )

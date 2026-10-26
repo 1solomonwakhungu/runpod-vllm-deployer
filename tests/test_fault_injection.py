@@ -97,7 +97,8 @@ def test_ambiguous_create_response_is_not_retried_and_warns_about_billable_pod(
     assert result.exit_code == 6, result.output
     assert len(posts) == 1, "a billable POST must never be blindly retried"
     assert "billable" in result.output
-    assert "runpod-vllm list" in result.output
+    assert "runpod-vllm --api-version v1 list" in result.output
+    assert "runpod-vllm --api-version v1 destroy --pod-id <POD-ID> --yes" in result.output
     assert not state_path.exists()
 
 
@@ -121,14 +122,150 @@ def test_create_timeout_warns_about_possible_billable_pod(
     assert result.exit_code == 5, result.output
     assert attempts == ["POST"]
     assert "billable" in result.output
-    assert "runpod-vllm list" in result.output
+    assert "runpod-vllm --api-version v1 list" in result.output
     assert not state_path.exists()
+
+
+def test_create_2xx_invalid_json_warns_about_possible_billable_pod(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, text="<html>not json</html>")
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app, ["--state-path", str(state_path), "deploy", "--model", "org/model", "--yes"]
+    )
+
+    assert result.exit_code == 6, result.output
+    assert "billable" in result.output
+    assert "runpod-vllm --api-version v1 list" in result.output
+    assert not state_path.exists()
+
+
+def test_create_2xx_wrong_shape_warns_about_possible_billable_pod(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json=["unexpected", "array"])
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app, ["--state-path", str(state_path), "deploy", "--model", "org/model", "--yes"]
+    )
+
+    assert result.exit_code == 6, result.output
+    assert "billable" in result.output
+    assert "runpod-vllm --api-version v1 list" in result.output
+    assert not state_path.exists()
+
+
+def test_create_missing_pod_id_warns_about_possible_billable_pod(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app, ["--state-path", str(state_path), "deploy", "--model", "org/model", "--yes"]
+    )
+
+    assert result.exit_code == 8, result.output
+    assert "did not return a valid Pod ID" in result.output
+    assert "billable" in result.output
+    assert "runpod-vllm --api-version v1 list" in result.output
+    assert not state_path.exists()
+
+
+def test_create_guidance_preserves_v2_version_and_default_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(502, text="bad gateway")
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 6, result.output
+    assert "runpod-vllm --api-version v2 list" in result.output
+    assert "--api-url" not in result.output, "default v2 URL needs no explicit flag"
+
+
+def test_create_guidance_preserves_custom_api_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://api.example.com/v2"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    assert f"runpod-vllm --api-version v2 --api-url {custom_url} list" in result.output, (
+        result.output
+    )
+    assert f"runpod-vllm --api-version v2 --api-url {custom_url} destroy" in result.output
 
 
 def test_full_v2_lifecycle_survives_injected_faults(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[str] = []
+    sleeps: list[float] = []
     deletes = 0
     deleted = False
 
@@ -152,7 +289,7 @@ def test_full_v2_lifecycle_survives_injected_faults(
         raise AssertionError(f"unexpected {request.method} {request.url.path}")
 
     monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
-    _install_real_client(monkeypatch, handler)
+    _install_real_client(monkeypatch, handler, sleeps=sleeps)
     state_path = tmp_path / "state.json"
 
     deploy = runner.invoke(
@@ -179,6 +316,8 @@ def test_full_v2_lifecycle_survives_injected_faults(
     assert destroy.exit_code == 0, destroy.output
     assert "verified absent: pod_v2x" in destroy.output
     assert deletes == 2, "the 503 DELETE must be retried exactly once"
+    assert sleeps, "the retry backoff must use the injected sleeper, not real sleep"
+    assert all(delay <= 2.0 for delay in sleeps), sleeps
     assert not state_path.exists()
     assert calls == [
         "POST /v2/pods",
