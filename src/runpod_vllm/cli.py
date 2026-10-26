@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
+from urllib.parse import urlsplit, urlunsplit
 
 import typer
 
@@ -34,7 +36,7 @@ from runpod_vllm.errors import ApiError, ExitCode, NetworkError, RunpodVllmError
 from runpod_vllm.models import DeploymentState, normalize_pod
 from runpod_vllm.payload import build_pod_payload
 from runpod_vllm.readiness import smoke_test_endpoint, wait_until_ready
-from runpod_vllm.redaction import redact_deployment_plan
+from runpod_vllm.redaction import REDACTED, redact_deployment_plan, redact_text
 from runpod_vllm.state import load_state, remove_state, save_state
 
 app = typer.Typer(
@@ -177,6 +179,23 @@ def _fail(exc: RunpodVllmError) -> NoReturn:
     raise typer.Exit(code=int(exc.exit_code))
 
 
+def _printable_api_url(url: str) -> str:
+    """Shell-quoted, secret-free form of the API URL for cleanup guidance.
+
+    A custom URL may carry shell metacharacters (``&`` in a query string would
+    split an unquoted command) or credentials (userinfo, secret query values),
+    so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
+    values are redacted before printing. The scheme, host, path, and remaining
+    query stay visible so the guidance still points at the original target.
+    """
+    parts = urlsplit(url)
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = f"{REDACTED}@{netloc.rsplit('@', 1)[-1]}"
+    printable = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return shlex.quote(redact_text(printable))
+
+
 def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> str:
     """Global options that reproduce the API target that created the Pod.
 
@@ -185,7 +204,7 @@ def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> str:
     """
     parts = [f"--api-version {target.version.value}"]
     if target.url != default_api_url(target.version):
-        parts.append(f"--api-url {target.url}")
+        parts.append(f"--api-url {_printable_api_url(target.url)}")
     return " ".join(parts)
 
 
