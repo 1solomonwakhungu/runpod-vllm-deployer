@@ -7,7 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 REDACTED = "<redacted>"
 _SENSITIVE_KEY = re.compile(
-    r"(?:authorization|api[_-]?key|token|secret|password|credential|cookie)", re.IGNORECASE
+    r"(?:^key$|authorization|api[_-]?key|token|secret|password|credential|cookie)",
+    re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+\-/=]+")
 _ASSIGNED_SECRET = re.compile(
