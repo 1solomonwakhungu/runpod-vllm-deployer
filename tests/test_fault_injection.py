@@ -21,7 +21,7 @@ from typer.testing import CliRunner
 from runpod_vllm.cli import app
 from runpod_vllm.client import RunPodClient
 from runpod_vllm.config import ApiVersion
-from runpod_vllm.errors import ReadinessTimeout
+from runpod_vllm.errors import ReadinessTimeout, StateError
 from runpod_vllm.models import DeploymentState
 from runpod_vllm.readiness import wait_until_ready
 from runpod_vllm.state import save_state
@@ -299,6 +299,8 @@ def test_create_guidance_quotes_and_redacts_custom_api_url(
     assert f"--api-url {quoted} destroy" in result.output
     assert "s3cret" not in result.output
     assert "shh123" not in result.output
+    assert "redacted placeholder and is not executable" in result.output, result.output
+    assert "Re-enter the exact original --api-url" in result.output, result.output
 
     printed = re.search(r"runpod-vllm (.+?) list", result.output)
     assert printed is not None, result.output
@@ -309,6 +311,182 @@ def test_create_guidance_quotes_and_redacts_custom_api_url(
         "--api-url",
         quoted.strip("'"),
     ], "the URL must survive as one shell argument"
+
+
+def test_create_guidance_non_sensitive_custom_url_stays_exact_copy_paste(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://proxy.example.com/v2?region=us&team=x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    assert f"runpod-vllm --api-version v2 --api-url '{custom_url}' list" in result.output, (
+        result.output
+    )
+    assert (
+        f"runpod-vllm --api-version v2 --api-url '{custom_url}' destroy --pod-id <POD-ID> --yes"
+        in result.output
+    ), result.output
+    assert "not executable" not in result.output, "a non-sensitive URL needs no placeholder note"
+    assert "Re-enter the exact original --api-url" not in result.output
+
+    printed = re.search(r"runpod-vllm (.+?) list", result.output)
+    assert printed is not None, result.output
+    tokens = shlex.split(printed.group(1))
+    assert tokens == [
+        "--api-version",
+        "v2",
+        "--api-url",
+        custom_url,
+    ], "the quoted URL must survive as one shell argument"
+
+
+def test_create_guidance_redacted_url_note_covers_userinfo_and_query_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://admin:p4ssw0rd@api.example.com/v1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    assert "admin" not in result.output, "userinfo must not leak into the guidance"
+    assert "p4ssw0rd" not in result.output, "userinfo secret must not leak"
+    assert "redacted placeholder and is not executable" in result.output, result.output
+    assert "Re-enter the exact original --api-url" in result.output, result.output
+
+
+def test_create_guidance_redacted_url_note_on_state_save_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://api.example.com/v2?token=shh123&team=x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"id": "pod123", "name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+
+    def fail_save(_path: Path, _state: DeploymentState) -> None:
+        raise StateError("disk full")
+
+    monkeypatch.setattr("runpod_vllm.cli.save_state", fail_save)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    assert (
+        "runpod-vllm --api-version v2 --api-url 'https://api.example.com/v2?token=<redacted>' destroy --pod-id pod123 --yes"
+        in result.output
+    ), result.output
+    assert "shh123" not in result.output, "query secret must not leak"
+    assert "redacted placeholder and is not executable" in result.output, result.output
+    assert "Re-enter the exact original --api-url" in result.output, result.output
+
+
+def test_create_guidance_non_sensitive_url_on_state_save_failure_is_exact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://api.example.com/v2?region=us&team=x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"id": "pod123", "name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+
+    def fail_save(_path: Path, _state: DeploymentState) -> None:
+        raise StateError("disk full")
+
+    monkeypatch.setattr("runpod_vllm.cli.save_state", fail_save)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    assert (
+        f"runpod-vllm --api-version v2 --api-url '{custom_url}' destroy --pod-id pod123 --yes"
+        in result.output
+    ), result.output
+    assert "not executable" not in result.output, "a non-sensitive URL needs no placeholder note"
+    assert "Re-enter the exact original --api-url" not in result.output
 
 
 def test_full_v2_lifecycle_survives_injected_faults(
@@ -478,7 +656,9 @@ def _v2_pod() -> dict[str, Any]:
 def _json_body(request: httpx.Request) -> dict[str, Any]:
     import json
 
-    return json.loads(request.content)
+    body = json.loads(request.content)
+    assert isinstance(body, dict)
+    return body
 
 
 def _save_state(path: Path) -> None:
