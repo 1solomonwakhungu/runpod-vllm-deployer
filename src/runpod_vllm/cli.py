@@ -179,7 +179,14 @@ def _fail(exc: RunpodVllmError) -> NoReturn:
     raise typer.Exit(code=int(exc.exit_code))
 
 
-def _printable_api_url(url: str) -> str:
+_REDACTED_URL_NOTE = (
+    "The --api-url value above is a redacted placeholder and is not executable. "
+    "Re-enter the exact original --api-url from your environment before "
+    "invoking list or destroy."
+)
+
+
+def _printable_api_url(url: str) -> tuple[str, bool]:
     """Shell-quoted, secret-free form of the API URL for cleanup guidance.
 
     A custom URL may carry shell metacharacters (``&`` in a query string would
@@ -187,25 +194,39 @@ def _printable_api_url(url: str) -> str:
     so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
     values are redacted before printing. The scheme, host, path, and remaining
     query stay visible so the guidance still points at the original target.
+
+    Returns ``(printed_url, redacted)``. ``redacted`` is True when userinfo or a
+    sensitive query value was replaced, meaning the printed URL is a placeholder
+    that cannot reach the original Pod and must be marked as non-executable.
     """
     parts = urlsplit(url)
     netloc = parts.netloc
+    redacted = False
     if "@" in netloc:
         netloc = f"{REDACTED}@{netloc.rsplit('@', 1)[-1]}"
+        redacted = True
     printable = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    return shlex.quote(redact_text(printable))
+    safe_printable = redact_text(printable)
+    if safe_printable != printable:
+        redacted = True
+    return shlex.quote(safe_printable), redacted
 
 
-def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> str:
+def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> tuple[str, bool]:
     """Global options that reproduce the API target that created the Pod.
 
     Global options must precede the subcommand. The URL is included only when it
     is not the built-in default for the version, so default targets stay readable.
+
+    Returns ``(flags, redacted_url)``. A ``redacted_url`` result means the
+    printed ``--api-url`` is a non-executable placeholder; callers must say so.
     """
     parts = [f"--api-version {target.version.value}"]
+    redacted = False
     if target.url != default_api_url(target.version):
-        parts.append(f"--api-url {_printable_api_url(target.url)}")
-    return " ".join(parts)
+        printed_url, redacted = _printable_api_url(target.url)
+        parts.append(f"--api-url {printed_url}")
+    return " ".join(parts), redacted
 
 
 def _warn_possible_billable_pod(cli_context: CliContext, target: ApiTarget) -> None:
@@ -214,9 +235,11 @@ def _warn_possible_billable_pod(cli_context: CliContext, target: ApiTarget) -> N
     The cleanup guidance repeats the exact ``--api-version`` (and a non-default
     ``--api-url``) that created the Pod, because listing or destroying through a
     different API version than the create used can give false reassurance: v2 may
-    not see a Pod created through v1 and vice versa.
+    not see a Pod created through v1 and vice versa. When the URL itself had to
+    be redacted, the printed command cannot reach the original Pod, so it is
+    explicitly marked as a placeholder with instructions to re-enter the URL.
     """
-    flags = _api_cleanup_flags(cli_context, target)
+    flags, redacted_url = _api_cleanup_flags(cli_context, target)
     typer.echo(
         "Critical: the Pod create request may have reached RunPod before failing, "
         "so a billable Pod may exist. Run "
@@ -224,6 +247,8 @@ def _warn_possible_billable_pod(cli_context: CliContext, target: ApiTarget) -> N
         f'"runpod-vllm {flags} destroy --pod-id <POD-ID> --yes".',
         err=True,
     )
+    if redacted_url:
+        typer.echo(_REDACTED_URL_NOTE, err=True)
 
 
 def _config(
@@ -555,13 +580,15 @@ def deploy(
         try:
             save_state(cli_context.state_path, state)
         except StateError:
-            flags = _api_cleanup_flags(cli_context, target)
+            flags, redacted_url = _api_cleanup_flags(cli_context, target)
             typer.echo(
                 f"Critical: Pod {pod_id} was created but state could not be saved. "
                 f"Clean it up with: runpod-vllm {flags} "
                 f"destroy --pod-id {pod_id} --yes",
                 err=True,
             )
+            if redacted_url:
+                typer.echo(_REDACTED_URL_NOTE, err=True)
             raise
         typer.echo(f"Pod created: {pod_id}")
         typer.echo(f"Teardown state: {cli_context.state_path}")
