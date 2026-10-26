@@ -30,7 +30,7 @@ from runpod_vllm.config import (
     parse_env_pairs,
     v1_retired,
 )
-from runpod_vllm.errors import ExitCode, RunpodVllmError, StateError
+from runpod_vllm.errors import ApiError, ExitCode, NetworkError, RunpodVllmError, StateError
 from runpod_vllm.models import DeploymentState, normalize_pod
 from runpod_vllm.payload import build_pod_payload
 from runpod_vllm.readiness import smoke_test_endpoint, wait_until_ready
@@ -175,6 +175,16 @@ def _pod_present(raw_pod: dict[str, Any] | None, api_version: ApiVersion) -> boo
 def _fail(exc: RunpodVllmError) -> NoReturn:
     typer.echo(f"Error: {exc}", err=True)
     raise typer.Exit(code=int(exc.exit_code))
+
+
+def _warn_ambiguous_create() -> None:
+    """A failed create POST may still have created a billable Pod on RunPod."""
+    typer.echo(
+        "Critical: the Pod create request may have reached RunPod before failing, "
+        'so a billable Pod may exist. Run "runpod-vllm list" and destroy any '
+        "unexpected Pod by ID.",
+        err=True,
+    )
 
 
 def _config(
@@ -477,7 +487,18 @@ def deploy(
         target = cli_context.api_target()
         payload = build_pod_payload(config, target.version)
         with cli_context.client(api_key, target) as client:
-            created = client.create_pod(payload)
+            try:
+                created = client.create_pod(payload)
+            except NetworkError:
+                # A timeout may still have reached RunPod and created a Pod.
+                _warn_ambiguous_create()
+                raise
+            except ApiError as exc:
+                # Gateway/ambiguity failures need a cleanup hint; 429 and other
+                # 4xx were rejected before RunPod acted on the request.
+                if exc.status_code is not None and exc.status_code >= 500:
+                    _warn_ambiguous_create()
+                raise
         pod_id = created.get("id")
         if not isinstance(pod_id, str) or not _POD_ID_PATTERN.fullmatch(pod_id):
             raise StateError("RunPod created a Pod but did not return a valid Pod ID.")
