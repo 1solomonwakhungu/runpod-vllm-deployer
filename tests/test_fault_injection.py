@@ -7,6 +7,8 @@ ambiguous create responses, readiness polling and teardown retries.
 
 from __future__ import annotations
 
+import re
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -259,6 +261,54 @@ def test_create_guidance_preserves_custom_api_url(
         result.output
     )
     assert f"runpod-vllm --api-version v2 --api-url {custom_url} destroy" in result.output
+
+
+def test_create_guidance_quotes_and_redacts_custom_api_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    custom_url = "https://user:s3cret@proxy.example.com/v2?region=us&token=shh123&team=x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json={"name": "vllm-server"})
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 8, result.output
+    quoted = "'https://<redacted>@proxy.example.com/v2?region=us&token=<redacted>'"
+    assert f"--api-url {quoted} list" in result.output, result.output
+    assert f"--api-url {quoted} destroy" in result.output
+    assert "s3cret" not in result.output
+    assert "shh123" not in result.output
+
+    printed = re.search(r"runpod-vllm (.+?) list", result.output)
+    assert printed is not None, result.output
+    tokens = shlex.split(printed.group(1))
+    assert tokens == [
+        "--api-version",
+        "v2",
+        "--api-url",
+        quoted.strip("'"),
+    ], "the URL must survive as one shell argument"
 
 
 def test_full_v2_lifecycle_survives_injected_faults(
