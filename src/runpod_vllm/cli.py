@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import typer
 
@@ -36,7 +36,11 @@ from runpod_vllm.errors import ApiError, ExitCode, NetworkError, RunpodVllmError
 from runpod_vllm.models import DeploymentState, normalize_pod
 from runpod_vllm.payload import build_pod_payload
 from runpod_vllm.readiness import smoke_test_endpoint, wait_until_ready
-from runpod_vllm.redaction import REDACTED, redact_deployment_plan, redact_text
+from runpod_vllm.redaction import (
+    REDACTED,
+    is_sensitive_key,
+    redact_deployment_plan,
+)
 from runpod_vllm.state import load_state, remove_state, save_state
 
 app = typer.Typer(
@@ -192,8 +196,11 @@ def _printable_api_url(url: str) -> tuple[str, bool]:
     A custom URL may carry shell metacharacters (``&`` in a query string would
     split an unquoted command) or credentials (userinfo, secret query values),
     so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
-    values are redacted before printing. The scheme, host, path, and remaining
-    query stay visible so the guidance still points at the original target.
+    values (any key matching ``is_sensitive_key``, e.g. ``key``, ``credential``,
+    ``cookie``) are redacted before printing. The scheme, host, path, and
+    remaining query stay visible so the guidance still points at the original
+    target. A URL with no sensitive query keys is not re-encoded, so the
+    printed value stays an exact copy-paste command.
 
     Returns ``(printed_url, redacted)``. ``redacted`` is True when userinfo or a
     sensitive query value was replaced, meaning the printed URL is a placeholder
@@ -206,10 +213,17 @@ def _printable_api_url(url: str) -> tuple[str, bool]:
         netloc = f"{REDACTED}@{netloc.rsplit('@', 1)[-1]}"
         redacted = True
     printable = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    safe_printable = redact_text(printable)
-    if safe_printable != printable:
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(is_sensitive_key(key) or key.casefold() == "key" for key, _ in query):
+        safe_query = urlencode(
+            [
+                (key, REDACTED if is_sensitive_key(key) or key.casefold() == "key" else value)
+                for key, value in query
+            ]
+        ).replace(quote(REDACTED, safe=""), REDACTED)
+        printable = urlunsplit((parts.scheme, netloc, parts.path, safe_query, parts.fragment))
         redacted = True
-    return shlex.quote(safe_printable), redacted
+    return shlex.quote(printable), redacted
 
 
 def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> tuple[str, bool]:

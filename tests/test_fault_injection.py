@@ -294,7 +294,7 @@ def test_create_guidance_quotes_and_redacts_custom_api_url(
     )
 
     assert result.exit_code == 8, result.output
-    quoted = "'https://<redacted>@proxy.example.com/v2?region=us&token=<redacted>'"
+    quoted = "'https://<redacted>@proxy.example.com/v2?region=us&token=<redacted>&team=x'"
     assert f"--api-url {quoted} list" in result.output, result.output
     assert f"--api-url {quoted} destroy" in result.output
     assert "s3cret" not in result.output
@@ -437,7 +437,7 @@ def test_create_guidance_redacted_url_note_on_state_save_failure(
 
     assert result.exit_code == 8, result.output
     assert (
-        "runpod-vllm --api-version v2 --api-url 'https://api.example.com/v2?token=<redacted>' destroy --pod-id pod123 --yes"
+        "runpod-vllm --api-version v2 --api-url 'https://api.example.com/v2?token=<redacted>&team=x' destroy --pod-id pod123 --yes"
         in result.output
     ), result.output
     assert "shh123" not in result.output, "query secret must not leak"
@@ -487,6 +487,45 @@ def test_create_guidance_non_sensitive_url_on_state_save_failure_is_exact(
     ), result.output
     assert "not executable" not in result.output, "a non-sensitive URL needs no placeholder note"
     assert "Re-enter the exact original --api-url" not in result.output
+
+
+@pytest.mark.parametrize("sensitive_key", ["key", "credential", "cookie"])
+def test_create_guidance_redacts_all_sensitive_query_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sensitive_key: str
+) -> None:
+    custom_url = f"https://api.example.com/v2?{sensitive_key}=TOPSECRET&team=x"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(502, text="bad gateway")
+        raise AssertionError(f"unexpected {request.method} {request.url.path}")
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+    _install_real_client(monkeypatch, handler)
+    state_path = tmp_path / "state.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "--api-url",
+            custom_url,
+            "deploy",
+            "--model",
+            "org/model",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 6, result.output
+    quoted = f"'https://api.example.com/v2?{sensitive_key}=<redacted>&team=x'"
+    assert f"--api-url {quoted} list" in result.output, result.output
+    assert "TOPSECRET" not in result.output, "query secret must not leak"
+    assert "redacted placeholder and is not executable" in result.output, result.output
+    assert "Re-enter the exact original --api-url" in result.output, result.output
 
 
 def test_full_v2_lifecycle_survives_injected_faults(
