@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import typer
 
@@ -30,11 +32,15 @@ from runpod_vllm.config import (
     parse_env_pairs,
     v1_retired,
 )
-from runpod_vllm.errors import ExitCode, RunpodVllmError, StateError
+from runpod_vllm.errors import ApiError, ExitCode, NetworkError, RunpodVllmError, StateError
 from runpod_vllm.models import DeploymentState, normalize_pod
 from runpod_vllm.payload import build_pod_payload
 from runpod_vllm.readiness import smoke_test_endpoint, wait_until_ready
-from runpod_vllm.redaction import redact_deployment_plan
+from runpod_vllm.redaction import (
+    REDACTED,
+    is_sensitive_key,
+    redact_deployment_plan,
+)
 from runpod_vllm.state import load_state, remove_state, save_state
 
 app = typer.Typer(
@@ -175,6 +181,88 @@ def _pod_present(raw_pod: dict[str, Any] | None, api_version: ApiVersion) -> boo
 def _fail(exc: RunpodVllmError) -> NoReturn:
     typer.echo(f"Error: {exc}", err=True)
     raise typer.Exit(code=int(exc.exit_code))
+
+
+_REDACTED_URL_NOTE = (
+    "The --api-url value above is a redacted placeholder and is not executable. "
+    "Re-enter the exact original --api-url from your environment before "
+    "invoking list or destroy."
+)
+
+
+def _printable_api_url(url: str) -> tuple[str, bool]:
+    """Shell-quoted, secret-free form of the API URL for cleanup guidance.
+
+    A custom URL may carry shell metacharacters (``&`` in a query string would
+    split an unquoted command) or credentials (userinfo, secret query values),
+    so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
+    values (any key matching ``is_sensitive_key``, e.g. ``key``, ``credential``,
+    ``cookie``) are redacted before printing. The scheme, host, path, and
+    remaining query stay visible so the guidance still points at the original
+    target. A URL with no sensitive query keys is not re-encoded, so the
+    printed value stays an exact copy-paste command.
+
+    Returns ``(printed_url, redacted)``. ``redacted`` is True when userinfo or a
+    sensitive query value was replaced, meaning the printed URL is a placeholder
+    that cannot reach the original Pod and must be marked as non-executable.
+    """
+    parts = urlsplit(url)
+    netloc = parts.netloc
+    redacted = False
+    if "@" in netloc:
+        netloc = f"{REDACTED}@{netloc.rsplit('@', 1)[-1]}"
+        redacted = True
+    printable = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(is_sensitive_key(key) or key.casefold() == "key" for key, _ in query):
+        safe_query = urlencode(
+            [
+                (key, REDACTED if is_sensitive_key(key) or key.casefold() == "key" else value)
+                for key, value in query
+            ]
+        ).replace(quote(REDACTED, safe=""), REDACTED)
+        printable = urlunsplit((parts.scheme, netloc, parts.path, safe_query, parts.fragment))
+        redacted = True
+    return shlex.quote(printable), redacted
+
+
+def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> tuple[str, bool]:
+    """Global options that reproduce the API target that created the Pod.
+
+    Global options must precede the subcommand. The URL is included only when it
+    is not the built-in default for the version, so default targets stay readable.
+
+    Returns ``(flags, redacted_url)``. A ``redacted_url`` result means the
+    printed ``--api-url`` is a non-executable placeholder; callers must say so.
+    """
+    parts = [f"--api-version {target.version.value}"]
+    redacted = False
+    if target.url != default_api_url(target.version):
+        printed_url, redacted = _printable_api_url(target.url)
+        parts.append(f"--api-url {printed_url}")
+    return " ".join(parts), redacted
+
+
+def _warn_possible_billable_pod(cli_context: CliContext, target: ApiTarget) -> None:
+    """A failed or unusable create response may still have created a billable Pod.
+
+    The cleanup guidance repeats the exact ``--api-version`` (and a non-default
+    ``--api-url``) that created the Pod, because listing or destroying through a
+    different API version than the create used can give false reassurance: v2 may
+    not see a Pod created through v1 and vice versa. When the URL itself had to
+    be redacted, the printed command cannot reach the original Pod, so it is
+    explicitly marked as a placeholder with instructions to re-enter the URL.
+    """
+    flags, redacted_url = _api_cleanup_flags(cli_context, target)
+    typer.echo(
+        "Critical: the Pod create request may have reached RunPod before failing, "
+        "so a billable Pod may exist. Run "
+        f'"runpod-vllm {flags} list" and destroy any unexpected Pod by ID with '
+        f'"runpod-vllm {flags} destroy --pod-id <POD-ID> --yes".',
+        err=True,
+    )
+    if redacted_url:
+        typer.echo(_REDACTED_URL_NOTE, err=True)
 
 
 def _config(
@@ -477,9 +565,23 @@ def deploy(
         target = cli_context.api_target()
         payload = build_pod_payload(config, target.version)
         with cli_context.client(api_key, target) as client:
-            created = client.create_pod(payload)
+            try:
+                created = client.create_pod(payload)
+            except NetworkError:
+                # A timeout may still have reached RunPod and created a Pod.
+                _warn_possible_billable_pod(cli_context, target)
+                raise
+            except ApiError as exc:
+                # A 2xx response with an unusable body (status_code=None) and
+                # gateway failures are ambiguous; 429 and other 4xx were
+                # rejected before RunPod acted on the request.
+                if exc.status_code is None or exc.status_code >= 500:
+                    _warn_possible_billable_pod(cli_context, target)
+                raise
         pod_id = created.get("id")
         if not isinstance(pod_id, str) or not _POD_ID_PATTERN.fullmatch(pod_id):
+            # RunPod may have created the Pod even though the response is unusable.
+            _warn_possible_billable_pod(cli_context, target)
             raise StateError("RunPod created a Pod but did not return a valid Pod ID.")
         state = DeploymentState.create(
             pod_id=pod_id,
@@ -492,12 +594,15 @@ def deploy(
         try:
             save_state(cli_context.state_path, state)
         except StateError:
+            flags, redacted_url = _api_cleanup_flags(cli_context, target)
             typer.echo(
                 f"Critical: Pod {pod_id} was created but state could not be saved. "
-                f"Clean it up with: runpod-vllm --api-version {target.version.value} "
+                f"Clean it up with: runpod-vllm {flags} "
                 f"destroy --pod-id {pod_id} --yes",
                 err=True,
             )
+            if redacted_url:
+                typer.echo(_REDACTED_URL_NOTE, err=True)
             raise
         typer.echo(f"Pod created: {pod_id}")
         typer.echo(f"Teardown state: {cli_context.state_path}")
