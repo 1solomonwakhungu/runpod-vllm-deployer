@@ -142,11 +142,16 @@ def test_skill_has_no_private_or_unsafe_markers(path: Path) -> None:
 
 def test_documented_commands_match_live_help() -> None:
     content = SKILL_PATHS[0].read_text(encoding="utf-8")
+    # Rich forces terminal styling when it sees these variables, as it does on
+    # GitHub Actions, and the escape codes split option names apart.
+    forced_styling = {"GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"}
+    plain_env = {key: value for key, value in os.environ.items() if key not in forced_styling}
+    plain_env.update({"COLUMNS": "240", "NO_COLOR": "1", "TERM": "dumb"})
     for command, expected_options in EXPECTED_OPTIONS.items():
         result = subprocess.run(
             [sys.executable, "-m", "runpod_vllm", command, "--help"],
             cwd=ROOT,
-            env={**os.environ, "COLUMNS": "240", "NO_COLOR": "1"},
+            env=plain_env,
             check=True,
             capture_output=True,
             text=True,
