@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test lint format typecheck check
+.PHONY: help setup test lint format typecheck check build
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "%-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -25,3 +25,6 @@ typecheck: ## Run strict type checking
 
 check: lint typecheck test ## Run the complete local quality gate
 	python scripts/safety_scan.py
+
+build: ## Build the wheel and sdist into dist/
+	python -m build
