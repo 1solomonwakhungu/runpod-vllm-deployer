@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing version to publish (for example, 0.1.0)"
+        required: true
+        type: string
+
+# Jobs opt in to the write scopes they need.
+permissions:
+  contents: read
+
+# One release at a time. A second push waits for the first run to finish
+# instead of racing it to the release commit and tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  lint-and-test:
+    name: Quality gate (Python ${{ matrix.python-version }})
+    # A manual run republishes a version that already passed this gate.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project and dev dependencies
+        run: python -m pip install -e '.[dev]'
+      # Ruff lint and format check, mypy, pytest and scripts/safety_scan.py.
+      - name: Run complete quality gate
+        run: make check
+
+  release:
+    name: Version, tag and publish
+    needs: lint-and-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      released: ${{ steps.semantic_release.outputs.released }}
+      version: ${{ steps.semantic_release.outputs.version }}
+      tag: ${{ steps.semantic_release.outputs.tag }}
+    steps:
+      # Check out the branch tip so semantic-release runs on main itself. The
+      # next step refuses to release unless that tip is the commit this run's
+      # gate tested.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and dev dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Configure Git for semantic-release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release (version + changelog + tag)
+        id: semantic_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # --no-vcs-release: the "Create GitHub Release" step below owns
+          # publishing the release so it can attach the built distributions.
+          before="$(git rev-parse HEAD)"
+          # Release only the commit the gate tested. If main has moved on,
+          # either a newer push has its own run queued behind this one, or
+          # this is a rerun after the release commit already landed. Rerun a
+          # failed publish with the manual dispatch instead.
+          if [ "$before" != "$GITHUB_SHA" ]; then
+            echo "main is at ${before}, not ${GITHUB_SHA}; skipping the release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python -m semantic_release version --no-vcs-release
+          # A new, tagged commit means semantic-release cut a version in this
+          # run. A tag on an unchanged HEAD is an earlier run's release.
+          if [ "$(git rev-parse HEAD)" != "$before" ] \
+            && tag="$(git describe --tags --exact-match HEAD 2>/dev/null)"; then
+            {
+              echo "released=true"
+              echo "tag=${tag}"
+              echo "version=${tag#v}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build distribution
+        if: steps.semantic_release.outputs.released == 'true'
+        run: python -m build
+
+      # The GitHub Release comes before PyPI on purpose: it must exist even if
+      # the upload fails. A failed upload is retried with the manual dispatch.
+      - name: Create GitHub Release
+        if: steps.semantic_release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.semantic_release.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes \
+            dist/*.whl dist/*.tar.gz
+
+      - name: Publish to PyPI
+        if: steps.semantic_release.outputs.released == 'true'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  # Manual retry for a version that is already tagged, for example when the
+  # PyPI upload failed after the tag and GitHub Release were created. Both
+  # publishing steps are safe to run again.
+  publish-existing-version:
+    name: Publish an existing version
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/v${{ inputs.version }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Verify the requested version
+        run: |
+          actual="$(python -c 'from pathlib import Path; namespace = {}; exec(Path("src/runpod_vllm/__init__.py").read_text(), namespace); print(namespace["__version__"])')"
+          test "$actual" = "$VERSION"
+      # Reuse the files already attached to the GitHub Release so PyPI gets
+      # the same bytes. Build only when the release itself is missing.
+      - name: Fetch or build the distribution, creating the GitHub Release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "GitHub Release v${VERSION} already exists; downloading its files."
+            gh release download "v${VERSION}" --dir dist \
+              --pattern '*.whl' --pattern '*.tar.gz'
+          else
+            python -m pip install --upgrade build
+            python -m build
+            gh release create "v${VERSION}" \
+              --verify-tag \
+              --title "v${VERSION}" \
+              --generate-notes \
+              dist/*.whl dist/*.tar.gz
+          fi
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          skip-existing: true

@@ -157,9 +157,9 @@ def test_documented_commands_match_live_help() -> None:
         assert expected_options <= set(re.findall(r"--[a-z][a-z0-9-]*", content))
 
 
-def test_repository_has_no_github_workflows() -> None:
+def test_release_is_the_only_github_workflow() -> None:
     workflow_dir = ROOT / ".github/workflows"
-    assert not workflow_dir.exists() or not any(workflow_dir.iterdir())
+    assert sorted(path.name for path in workflow_dir.iterdir()) == ["release.yml"]
 
 
 def test_readme_keeps_removed_content_absent() -> None:
