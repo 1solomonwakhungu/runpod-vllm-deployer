@@ -40,6 +40,25 @@ See [Architecture](docs/architecture.md) for design boundaries and failure behav
 
 Python 3.11 or newer is required.
 
+### Released version
+
+Each version on the [Releases page](https://github.com/1solomonwakhungu/runpod-vllm-deployer/releases) has a wheel and a source distribution attached. Install a wheel directly, replacing `0.1.0` in both places with the version you want:
+
+```bash
+python -m pip install https://github.com/1solomonwakhungu/runpod-vllm-deployer/releases/download/v0.1.0/runpod_vllm_deployer-0.1.0-py3-none-any.whl
+runpod-vllm --help
+```
+
+Once the package is published to PyPI, this also works:
+
+```bash
+python -m pip install runpod-vllm-deployer
+```
+
+Changes in each version are recorded in the [changelog](https://github.com/1solomonwakhungu/runpod-vllm-deployer/blob/main/CHANGELOG.md), which is generated with the first release. Releases are automated; see [RELEASING.md](RELEASING.md).
+
+### From source
+
 ```bash
 git clone https://github.com/1solomonwakhungu/runpod-vllm-deployer.git
 cd runpod-vllm-deployer

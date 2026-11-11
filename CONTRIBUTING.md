@@ -23,6 +23,27 @@ All tests must remain offline. Use `httpx.MockTransport`, fixtures, or fakes for
 4. Run `make check`.
 5. Confirm the diff contains no credentials, Pod IDs, private paths, or private URLs.
 
-Use clear commit messages. Changes that weaken confirmation gates, teardown-state persistence, redaction, or offline testing need an explicit rationale and focused tests.
+Changes that weaken confirmation gates, teardown-state persistence, redaction, or offline testing need an explicit rationale and focused tests.
+
+## Commit and pull request titles
+
+Commit messages and pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/), for example `fix: retry readiness checks after a timeout`. Releases are automated, and the commit type decides the next version. Pull requests are merged with **Squash and merge**. GitHub uses the pull request title as the commit on `main`, except for a single-commit pull request, where it uses that commit's message, so keep both in the format.
+
+| Type | Use for | Release |
+| --- | --- | --- |
+| `feat` | A new feature | Minor |
+| `fix` | A bug fix | Patch |
+| `perf` | A performance improvement | Patch |
+| `docs` | Documentation only | None |
+| `test` | Tests only | None |
+| `refactor` | Restructuring without a behavior change | None |
+| `style` | Formatting only | None |
+| `build` | Build system or packaging | None |
+| `ci` | Workflow changes | None |
+| `chore` | Other maintenance | None |
+
+Mark a breaking change with `!` after the type, for example `feat!: remove the --legacy flag`, or with a `BREAKING CHANGE:` footer. While the project is `0.x`, a breaking change bumps the minor version.
+
+Do not edit the version, `CHANGELOG.md`, or tags by hand. See [RELEASING.md](RELEASING.md) for the full process.
 
 By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
