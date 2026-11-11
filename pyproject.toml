@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Solomon Wakhungu" }]
-version = "0.1.0"
+dynamic = ["version"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
@@ -27,15 +27,26 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2,<2",
   "mypy>=1.15,<3",
   "pytest>=8.3,<10",
   "pytest-cov>=6,<8",
+  "python-semantic-release>=10.5,<11",
   "respx>=0.22,<1",
   "ruff>=0.11,<1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/1solomonwakhungu/runpod-vllm-deployer"
+Repository = "https://github.com/1solomonwakhungu/runpod-vllm-deployer"
+Issues = "https://github.com/1solomonwakhungu/runpod-vllm-deployer/issues"
+Changelog = "https://github.com/1solomonwakhungu/runpod-vllm-deployer/blob/main/CHANGELOG.md"
+
 [project.scripts]
 runpod-vllm = "runpod_vllm.cli:app"
+
+[tool.hatch.version]
+path = "src/runpod_vllm/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/runpod_vllm"]
@@ -60,3 +71,23 @@ ignore = ["B008", "E501"]
 python_version = "3.11"
 strict = true
 files = ["src"]
+
+[tool.semantic_release]
+# src/runpod_vllm/__init__.py is the only place the version is written down;
+# hatchling reads it from there at build time ([tool.hatch.version]).
+version_variables = ["src/runpod_vllm/__init__.py:__version__"]
+commit_parser = "conventional"
+changelog_file = "CHANGELOG.md"
+tag_format = "v{version}"
+commit_author = "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+commit_message = "chore(release): {version}\n\nAutomated release via python-semantic-release"
+# Stay on 0.x until a 1.0.0 is cut on purpose: without these two settings the
+# first release would be 1.0.0, and a breaking change would bump the major.
+allow_zero_version = true
+major_on_zero = false
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.commit_parser_options]
+allowed_types = ["feat", "fix", "docs", "chore", "refactor", "test", "ci", "perf", "style", "build"]
