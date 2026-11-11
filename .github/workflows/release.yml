@@ -23,6 +23,8 @@ concurrency:
 jobs:
   lint-and-test:
     name: Quality gate (Python ${{ matrix.python-version }})
+    # A manual run republishes a version that already passed this gate.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -58,9 +60,9 @@ jobs:
       version: ${{ steps.semantic_release.outputs.version }}
       tag: ${{ steps.semantic_release.outputs.tag }}
     steps:
-      # Check out the branch tip, not the pushed SHA: a run that waited in the
-      # concurrency queue must start from the previous run's release commit or
-      # its own push to main would be rejected.
+      # Check out the branch tip so semantic-release runs on main itself. The
+      # next step refuses to release unless that tip is the commit this run's
+      # gate tested.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,9 +88,21 @@ jobs:
         run: |
           # --no-vcs-release: the "Create GitHub Release" step below owns
           # publishing the release so it can attach the built distributions.
+          before="$(git rev-parse HEAD)"
+          # Release only the commit the gate tested. If main has moved on,
+          # either a newer push has its own run queued behind this one, or
+          # this is a rerun after the release commit already landed. Rerun a
+          # failed publish with the manual dispatch instead.
+          if [ "$before" != "$GITHUB_SHA" ]; then
+            echo "main is at ${before}, not ${GITHUB_SHA}; skipping the release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           python -m semantic_release version --no-vcs-release
-          # A tag on HEAD means semantic-release cut a version in this run.
-          if tag="$(git describe --tags --exact-match HEAD 2>/dev/null)"; then
+          # A new, tagged commit means semantic-release cut a version in this
+          # run. A tag on an unchanged HEAD is an earlier run's release.
+          if [ "$(git rev-parse HEAD)" != "$before" ] \
+            && tag="$(git describe --tags --exact-match HEAD 2>/dev/null)"; then
             {
               echo "released=true"
               echo "tag=${tag}"
@@ -147,17 +161,19 @@ jobs:
         run: |
           actual="$(python -c 'from pathlib import Path; namespace = {}; exec(Path("src/runpod_vllm/__init__.py").read_text(), namespace); print(namespace["__version__"])')"
           test "$actual" = "$VERSION"
-      - name: Build distribution
-        run: |
-          python -m pip install --upgrade build
-          python -m build
-      - name: Create GitHub Release if missing
+      # Reuse the files already attached to the GitHub Release so PyPI gets
+      # the same bytes. Build only when the release itself is missing.
+      - name: Fetch or build the distribution, creating the GitHub Release if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo "GitHub Release v${VERSION} already exists; leaving it alone."
+            echo "GitHub Release v${VERSION} already exists; downloading its files."
+            gh release download "v${VERSION}" --dir dist \
+              --pattern '*.whl' --pattern '*.tar.gz'
           else
+            python -m pip install --upgrade build
+            python -m build
             gh release create "v${VERSION}" \
               --verify-tag \
               --title "v${VERSION}" \
