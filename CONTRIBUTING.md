@@ -27,7 +27,7 @@ Changes that weaken confirmation gates, teardown-state persistence, redaction, o
 
 ## Commit and pull request titles
 
-Commit messages and pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/), for example `fix: retry readiness checks after a timeout`. Releases are automated, and the commit type decides the next version. Pull requests are squash-merged, so the pull request title becomes the commit on `main`.
+Commit messages and pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/), for example `fix: retry readiness checks after a timeout`. Releases are automated, and the commit type decides the next version. Pull requests are merged with **Squash and merge**. GitHub uses the pull request title as the commit on `main`, except for a single-commit pull request, where it uses that commit's message, so keep both in the format.
 
 | Type | Use for | Release |
 | --- | --- | --- |
