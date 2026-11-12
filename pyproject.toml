@@ -51,6 +51,10 @@ path = "src/runpod_vllm/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/runpod_vllm"]
 
+[tool.hatch.build.targets.sdist]
+# The static site in landing-page/ is not part of the Python distribution.
+exclude = ["/landing-page"]
+
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=runpod_vllm --cov-report=term-missing --cov-fail-under=85"
 testpaths = ["tests"]
