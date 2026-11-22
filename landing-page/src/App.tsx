@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  callEndpointCurl,
+  callEndpointPython,
   commands,
   exitCodes,
   gpus,
@@ -355,8 +357,10 @@ function Configuration() {
               [
                 "RunPod API",
                 <>
-                  REST v1 and v2 payloads. v1 is the default until RunPod retires it on 2026-11-15, then v2, with no
-                  upgrade needed. Opt in earlier with <Code>--api-version v2</Code>.
+                  Defaults to REST v2 (<Code>https://api.runpod.io/v2</Code>) following RunPod's 2026-11-15 v1
+                  retirement, and moves older v1 state files to v2 automatically on <Code>status</Code> and{" "}
+                  <Code>destroy</Code>. Override explicitly with <Code>--api-version</Code> or{" "}
+                  <Code>RUNPOD_API_VERSION</Code>.
                 </>,
               ],
               [
@@ -458,23 +462,69 @@ function Install() {
                 {
                   title: "Plan offline",
                   note: "No API key, no network request.",
-                  command: "runpod-vllm plan \\\n  --model ORG/MODEL \\\n  --gpu A40 \\\n  --max-model-len 8192",
+                  content: (
+                    <CommandBlock
+                      command={"runpod-vllm plan \\\n  --model Qwen/Qwen3-8B \\\n  --gpu A40 \\\n  --max-model-len 8192"}
+                      label="Plan offline"
+                    />
+                  ),
                 },
                 {
                   title: "Deploy",
                   note: "Billable. Put RUNPOD_API_KEY in a local .env file first. The CLI prompts for confirmation.",
-                  command:
-                    "runpod-vllm --env-file .env deploy \\\n  --model ORG/MODEL \\\n  --gpu A40 \\\n  --max-model-len 8192",
+                  content: (
+                    <CommandBlock
+                      command={
+                        "runpod-vllm --env-file .env deploy \\\n  --model Qwen/Qwen3-8B \\\n  --gpu A40 \\\n  --max-model-len 8192"
+                      }
+                      label="Deploy"
+                    />
+                  ),
                 },
                 {
                   title: "Wait, then smoke test",
                   note: "Polls until vLLM is ready, then sends one deterministic request.",
-                  command: "runpod-vllm wait --timeout 900\nrunpod-vllm smoke-test",
+                  content: (
+                    <CommandBlock
+                      command={"runpod-vllm wait --timeout 900\nrunpod-vllm smoke-test"}
+                      label="Wait, then smoke test"
+                    />
+                  ),
+                },
+                {
+                  title: "Call your OpenAI-compatible endpoint",
+                  note: (
+                    <>
+                      Point any OpenAI SDK client or <Code>curl</Code> at{" "}
+                      <Code>https://&lt;POD_ID&gt;-8000.proxy.runpod.net/v1</Code>.
+                    </>
+                  ),
+                  content: (
+                    <Tabs defaultValue="python">
+                      <TabsList>
+                        <TabsTrigger value="python">Python (openai)</TabsTrigger>
+                        <TabsTrigger value="curl">curl</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="python" className="panel-in">
+                        <CommandBlock
+                          command={callEndpointPython}
+                          label="Call the OpenAI-compatible endpoint with Python"
+                          prompt={false}
+                        />
+                      </TabsContent>
+                      <TabsContent value="curl" className="panel-in">
+                        <CommandBlock
+                          command={callEndpointCurl}
+                          label="Call the OpenAI-compatible endpoint with curl"
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  ),
                 },
                 {
                   title: "Destroy",
                   note: "Terminates the Pod and verifies it is absent.",
-                  command: "runpod-vllm --env-file .env destroy",
+                  content: <CommandBlock command="runpod-vllm --env-file .env destroy" label="Destroy" />,
                 },
               ].map((step, index) => (
                 <li key={step.title} className="grid gap-3 sm:grid-cols-[2rem_minmax(0,1fr)]">
@@ -489,7 +539,7 @@ function Install() {
                       <span className="font-medium text-zinc-100">{step.title}.</span>{" "}
                       <span className="text-zinc-400">{step.note}</span>
                     </p>
-                    <CommandBlock command={step.command} label={step.title} />
+                    {step.content}
                   </div>
                 </li>
               ))}

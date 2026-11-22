@@ -33,15 +33,25 @@ runpod-vllm --help`;
 
 export const installSkill = `npx skills add ${REPO} --skill runpod-vllm-gpu-deploy`;
 
-// Captured from `runpod-vllm plan` at v0.1.0 with no API key set.
-const planOutput = `Deployment plan for RunPod REST v1 (offline; no API call)
+export const callEndpointPython = `from openai import OpenAI
+
+client = OpenAI(base_url="https://<POD_ID>-8000.proxy.runpod.net/v1", api_key="EMPTY")
+response = client.chat.completions.create(
+    model="Qwen/Qwen3-8B",
+    messages=[{"role": "user", "content": "Hello from RunPod vLLM!"}],
+)
+print(response.choices[0].message.content)`;
+
+export const callEndpointCurl = `curl https://<POD_ID>-8000.proxy.runpod.net/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"user","content":"Hello from RunPod vLLM!"}]}'`;
+
+// Captured from `runpod-vllm plan` (RunPod REST v2) with no API key set.
+const planOutput = `Deployment plan for RunPod REST v2 (offline; no API call)
 {
-  "cloudType": "SECURE",
-  "computeType": "GPU",
-  "containerDiskInGb": 50,
-  "dataCenterPriority": "availability",
-  "dockerEntrypoint": [],
-  "dockerStartCmd": [
+  "cloud": "SECURE",
+  "disk": 50,
+  "entrypoint": [
     "vllm",
     "serve",
     "Qwen/Qwen3-8B",
@@ -61,22 +71,23 @@ const planOutput = `Deployment plan for RunPod REST v1 (offline; no API call)
     "auto"
   ],
   "env": {},
-  "gpuCount": 1,
-  "gpuTypeIds": [
-    "NVIDIA A40"
-  ],
-  "gpuTypePriority": "availability",
-  "imageName": "vllm/vllm-openai:v0.19.1",
-  "interruptible": false,
-  "minRAMPerGPU": 16,
-  "minVCPUPerGPU": 4,
+  "gpu": {
+    "count": 1,
+    "id": "NVIDIA A40",
+    "minRamPerGpu": 16,
+    "minVcpuCountPerGpu": 4
+  },
+  "image": "vllm/vllm-openai:v0.19.1",
+  "mounts": {
+    "persistent": {
+      "path": "/workspace",
+      "size": 40
+    }
+  },
   "name": "vllm-server",
   "ports": [
     "8000/http"
-  ],
-  "supportPublicIp": true,
-  "volumeInGb": 40,
-  "volumeMountPath": "/workspace"
+  ]
 }`;
 
 export type Tone = "safe" | "warning" | "destructive" | "outline";
@@ -108,7 +119,7 @@ export const steps: Step[] = [
   --max-model-len 8192`,
     output: planOutput,
     provenance:
-      "Real output, captured from v0.1.0 with no API key set. The CLI targets REST v1 until 2026-11-15 and v2 after.",
+      "Real output, captured from v0.1.0 with no API key set. Defaults to RunPod REST v2 (https://api.runpod.io/v2) following RunPod's 2026-11-15 v1 retirement, and moves older v1 state files to v2 automatically on status and destroy.",
   },
   {
     id: "deploy",
