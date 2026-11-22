@@ -230,6 +230,8 @@ def test_wait_and_smoke_test_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert wait_result.exit_code == 0, wait_result.output
     assert "Ready after 1.5s and 2 attempts" in wait_result.output
+    assert "OpenAI base URL: https://pod.example/v1" in wait_result.output
+    assert "export OPENAI_BASE_URL=https://pod.example/v1" in wait_result.output
 
     smoke_result = runner.invoke(
         app,
@@ -245,6 +247,126 @@ def test_wait_and_smoke_test_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert smoke_result.exit_code == 0, smoke_result.output
     assert '"total_tokens": 5' in smoke_result.output
+    assert "OpenAI base URL: https://pod.example/v1" in smoke_result.output
+    assert "export OPENAI_BASE_URL=https://pod.example/v1" in smoke_result.output
+
+
+@pytest.mark.parametrize(
+    ("raw_url", "expected_url"),
+    [
+        ("https://pod.example///", "https://pod.example/v1"),
+        ("https://pod.example/v1", "https://pod.example/v1"),
+        ("https://pod.example/v1/", "https://pod.example/v1"),
+        ("https://pod.example/proxy", "https://pod.example/proxy/v1"),
+    ],
+)
+def test_wait_and_smoke_test_normalize_openai_base_url(
+    monkeypatch: pytest.MonkeyPatch, raw_url: str, expected_url: str
+) -> None:
+    monkeypatch.setattr(
+        "runpod_vllm.cli.wait_until_ready",
+        lambda base_url, **_kwargs: ReadinessResult(base_url, ("org/model",), 1, 0.5),
+    )
+    monkeypatch.setattr(
+        "runpod_vllm.cli.smoke_test_endpoint",
+        lambda *_args, **_kwargs: {"choices": [{}]},
+    )
+
+    wait_result = runner.invoke(app, ["wait", "--base-url", raw_url])
+    assert wait_result.exit_code == 0, wait_result.output
+    assert f"OpenAI base URL: {expected_url}" in wait_result.output
+    assert f"export OPENAI_BASE_URL={expected_url}" in wait_result.output
+
+    smoke_result = runner.invoke(app, ["smoke-test", "--base-url", raw_url, "--model", "org/model"])
+    assert smoke_result.exit_code == 0, smoke_result.output
+    assert f"OpenAI base URL: {expected_url}" in smoke_result.output
+    assert f"export OPENAI_BASE_URL={expected_url}" in smoke_result.output
+
+
+def test_wait_and_smoke_test_redact_credentials_in_openai_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_url = "https://alice:super-secret-pass@pod.example/?api_key=query-secret&mode=fast"
+    monkeypatch.setattr(
+        "runpod_vllm.cli.wait_until_ready",
+        lambda base_url, **_kwargs: ReadinessResult(base_url, ("org/model",), 1, 0.5),
+    )
+    monkeypatch.setattr(
+        "runpod_vllm.cli.smoke_test_endpoint",
+        lambda *_args, **_kwargs: {"choices": [{}]},
+    )
+
+    for args in (
+        ["wait", "--base-url", secret_url],
+        ["smoke-test", "--base-url", secret_url, "--model", "org/model"],
+    ):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+        assert "alice" not in result.output
+        assert "super-secret-pass" not in result.output
+        assert "query-secret" not in result.output
+        expected_redacted = "https://<redacted>@pod.example/v1?api_key=<redacted>&mode=fast"
+        assert f"OpenAI base URL: {expected_redacted}" in result.output
+        assert f"export OPENAI_BASE_URL='{expected_redacted}'" in result.output
+        assert "credentials in the base URL above were redacted" in result.output
+
+
+def test_plan_and_deploy_support_new_profiles_and_gpu_type_id_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("runpod_vllm.cli.RunPodClient", FakeClient)
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+
+    plan_profile = runner.invoke(app, ["plan", "--model", "org/model", "--gpu", "RTX4090"])
+    assert plan_profile.exit_code == 0, plan_profile.output
+    assert '"NVIDIA GeForce RTX 4090"' in plan_profile.output
+
+    plan_override = runner.invoke(
+        app,
+        ["plan", "--model", "org/model", "--gpu-type-id", "NVIDIA RTX PRO 6000"],
+    )
+    assert plan_override.exit_code == 0, plan_override.output
+    assert '"NVIDIA RTX PRO 6000"' in plan_override.output
+
+    deploy_override = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(tmp_path / "state.json"),
+            "deploy",
+            "--model",
+            "org/model",
+            "--gpu-type-id",
+            "NVIDIA RTX PRO 6000",
+            "--yes",
+        ],
+    )
+    assert deploy_override.exit_code == 0, deploy_override.output
+    assert FakeClient.created_payload is not None
+    assert FakeClient.created_payload["gpuTypeIds"] == ["NVIDIA RTX PRO 6000"]
+
+    for bad_value in ("", "   ", "NVIDIA A40\n", "NVIDIA A40; rm -rf /", "A" * 121):
+        bad_plan = runner.invoke(app, ["plan", "--model", "org/model", "--gpu-type-id", bad_value])
+        assert bad_plan.exit_code == 3
+        assert "GPU type ID override" in bad_plan.output
+
+    FakeClient.created_payload = None
+    bad_deploy = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(tmp_path / "bad-state.json"),
+            "deploy",
+            "--model",
+            "org/model",
+            "--gpu-type-id",
+            "NVIDIA $(id)",
+            "--yes",
+        ],
+    )
+    assert bad_deploy.exit_code == 3
+    assert "GPU type ID override" in bad_deploy.output
+    assert FakeClient.created_payload is None
 
 
 def test_status_absent_list_empty_and_destroy_confirmation(

@@ -50,9 +50,69 @@ def test_payload_uses_current_rest_fields_and_vllm_options() -> None:
     assert command[command.index("--tensor-parallel-size") + 1] == "2"
 
 
-@pytest.mark.parametrize("gpu", ["A40", "L40S", "A100", "H100", "H200", "B200"])
-def test_required_gpu_profiles_validate(gpu: str) -> None:
-    assert DeploymentConfig(model="org/model", gpu=gpu).validated().gpu_type_id.startswith("NVIDIA")
+@pytest.mark.parametrize(
+    ("gpu", "expected_id"),
+    [
+        ("RTX4090", "NVIDIA GeForce RTX 4090"),
+        ("RTX5090", "NVIDIA GeForce RTX 5090"),
+        ("A6000", "NVIDIA RTX A6000"),
+        ("A40", "NVIDIA A40"),
+        ("L40S", "NVIDIA L40S"),
+        ("A100", "NVIDIA A100-SXM4-80GB"),
+        ("H100", "NVIDIA H100 80GB HBM3"),
+        ("H200", "NVIDIA H200"),
+        ("B200", "NVIDIA B200"),
+    ],
+)
+def test_required_gpu_profiles_validate(gpu: str, expected_id: str) -> None:
+    config = DeploymentConfig(model="org/model", gpu=gpu).validated()
+    assert config.gpu_type_id == expected_id
+    payload = build_pod_payload(config)
+    assert payload["gpuTypeIds"] == [expected_id]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        "NVIDIA GeForce RTX 4090",
+        "AMD Instinct MI300X OAM",
+        "NVIDIA RTX PRO 6000 (Blackwell)",
+        "AB",
+        "A" * 120,
+    ],
+)
+def test_gpu_type_id_override_validates_and_overrides_profile(override: str) -> None:
+    config = DeploymentConfig(
+        model="org/model",
+        gpu="UNLISTED",
+        gpu_type_id_override=override,
+    ).validated()
+    assert config.gpu_type_id == override
+    payload = build_pod_payload(config)
+    assert payload["gpuTypeIds"] == [override]
+
+
+@pytest.mark.parametrize(
+    "bad_override",
+    [
+        "",
+        "   ",
+        "A",
+        "A" * 121,
+        " NVIDIA A40",
+        "NVIDIA A40 ",
+        "NVIDIA A40\n",
+        "NVIDIA\nA40",
+        "NVIDIA\rA40",
+        "NVIDIA\x00A40",
+        "NVIDIA A40; rm -rf /",
+        "NVIDIA $(id)",
+        "NVIDIA `id`",
+    ],
+)
+def test_gpu_type_id_override_rejects_unsafe_values(bad_override: str) -> None:
+    with pytest.raises(ConfigurationError, match="GPU type ID override"):
+        DeploymentConfig(model="org/model", gpu_type_id_override=bad_override).validated()
 
 
 @pytest.mark.parametrize(
