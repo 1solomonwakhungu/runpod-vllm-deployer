@@ -190,21 +190,11 @@ _REDACTED_URL_NOTE = (
 )
 
 
-def _printable_api_url(url: str) -> tuple[str, bool]:
-    """Shell-quoted, secret-free form of the API URL for cleanup guidance.
+def _sanitize_url(url: str) -> tuple[str, bool]:
+    """Redact userinfo and sensitive query values from a URL without shell-quoting.
 
-    A custom URL may carry shell metacharacters (``&`` in a query string would
-    split an unquoted command) or credentials (userinfo, secret query values),
-    so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
-    values (any key matching ``is_sensitive_key``, e.g. ``key``, ``credential``,
-    ``cookie``) are redacted before printing. The scheme, host, path, and
-    remaining query stay visible so the guidance still points at the original
-    target. A URL with no sensitive query keys is not re-encoded, so the
-    printed value stays an exact copy-paste command.
-
-    Returns ``(printed_url, redacted)``. ``redacted`` is True when userinfo or a
-    sensitive query value was replaced, meaning the printed URL is a placeholder
-    that cannot reach the original Pod and must be marked as non-executable.
+    Returns ``(printable_url, redacted)``. ``redacted`` is True when userinfo or
+    a sensitive query value was replaced.
     """
     parts = urlsplit(url)
     netloc = parts.netloc
@@ -223,7 +213,48 @@ def _printable_api_url(url: str) -> tuple[str, bool]:
         ).replace(quote(REDACTED, safe=""), REDACTED)
         printable = urlunsplit((parts.scheme, netloc, parts.path, safe_query, parts.fragment))
         redacted = True
+    return printable, redacted
+
+
+def _printable_api_url(url: str) -> tuple[str, bool]:
+    """Shell-quoted, secret-free form of the API URL for cleanup guidance.
+
+    A custom URL may carry shell metacharacters (``&`` in a query string would
+    split an unquoted command) or credentials (userinfo, secret query values),
+    so it is quoted with ``shlex.quote`` and userinfo plus sensitive query
+    values (any key matching ``is_sensitive_key``, e.g. ``key``, ``credential``,
+    ``cookie``) are redacted before printing. The scheme, host, path, and
+    remaining query stay visible so the guidance still points at the original
+    target. A URL with no sensitive query keys is not re-encoded, so the
+    printed value stays an exact copy-paste command.
+
+    Returns ``(printed_url, redacted)``. ``redacted`` is True when userinfo or a
+    sensitive query value was replaced, meaning the printed URL is a placeholder
+    that cannot reach the original Pod and must be marked as non-executable.
+    """
+    printable, redacted = _sanitize_url(url)
     return shlex.quote(printable), redacted
+
+
+def _openai_base_url(base_url: str) -> str:
+    """Normalize a vLLM endpoint base URL to end with ``/v1``."""
+    parts = urlsplit(base_url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path = f"{path}/v1"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
+def _echo_openai_base_url(base_url: str) -> None:
+    """Print a safe OpenAI-compatible base URL and shell export snippet."""
+    safe_url, redacted = _sanitize_url(_openai_base_url(base_url))
+    typer.echo(f"OpenAI base URL: {safe_url}")
+    typer.echo(f"export OPENAI_BASE_URL={shlex.quote(safe_url)}")
+    if redacted:
+        typer.echo(
+            "Note: credentials in the base URL above were redacted; "
+            "re-enter the original URL from your environment before exporting."
+        )
 
 
 def _api_cleanup_flags(cli_context: CliContext, target: ApiTarget) -> tuple[str, bool]:
@@ -270,6 +301,7 @@ def _config(
     model: str,
     name: str,
     gpu: str,
+    gpu_type_id: str | None = None,
     gpu_count: int,
     tensor_parallel_size: int,
     container_disk_gb: int,
@@ -317,6 +349,7 @@ def _config(
         data_centers=tuple(data_center or []),
         port=port,
         environment=env,
+        gpu_type_id_override=gpu_type_id,
     ).validated()
 
 
@@ -325,6 +358,7 @@ def _common_config(
     model: str,
     name: str,
     gpu: str,
+    gpu_type_id: str | None,
     gpu_count: int,
     tensor_parallel_size: int,
     container_disk_gb: int,
@@ -352,6 +386,7 @@ def _common_config(
         model=model,
         name=name,
         gpu=gpu,
+        gpu_type_id=gpu_type_id,
         gpu_count=gpu_count,
         tensor_parallel_size=tensor_parallel_size,
         container_disk_gb=container_disk_gb,
@@ -381,7 +416,14 @@ def plan(
     model: str = typer.Option(..., "--model", help="Hugging Face model ID."),
     name: str = typer.Option("vllm-server", "--name", help="Pod name; sanitized before use."),
     gpu: str = typer.Option(
-        "A40", "--gpu", help="GPU profile: A40, L40S, A100, H100, H200, or B200."
+        "A40",
+        "--gpu",
+        help="GPU profile: RTX4090, RTX5090, A6000, A40, L40S, A100, H100, H200, or B200.",
+    ),
+    gpu_type_id: str | None = typer.Option(
+        None,
+        "--gpu-type-id",
+        help="Raw RunPod GPU type ID; overrides --gpu when set.",
     ),
     gpu_count: int = typer.Option(1, "--gpu-count", min=1, max=8, help="Number of GPUs."),
     tensor_parallel_size: int = typer.Option(
@@ -438,6 +480,7 @@ def plan(
             model,
             name,
             gpu,
+            gpu_type_id,
             gpu_count,
             tensor_parallel_size,
             container_disk_gb,
@@ -472,7 +515,14 @@ def deploy(
     model: str = typer.Option(..., "--model", help="Hugging Face model ID."),
     name: str = typer.Option("vllm-server", "--name", help="Pod name; sanitized before use."),
     gpu: str = typer.Option(
-        "A40", "--gpu", help="GPU profile: A40, L40S, A100, H100, H200, or B200."
+        "A40",
+        "--gpu",
+        help="GPU profile: RTX4090, RTX5090, A6000, A40, L40S, A100, H100, H200, or B200.",
+    ),
+    gpu_type_id: str | None = typer.Option(
+        None,
+        "--gpu-type-id",
+        help="Raw RunPod GPU type ID; overrides --gpu when set.",
     ),
     gpu_count: int = typer.Option(1, "--gpu-count", min=1, max=8, help="Number of GPUs."),
     tensor_parallel_size: int = typer.Option(
@@ -533,6 +583,7 @@ def deploy(
             model,
             name,
             gpu,
+            gpu_type_id,
             gpu_count,
             tensor_parallel_size,
             container_disk_gb,
@@ -657,6 +708,7 @@ def wait_command(
             f"Ready after {result.elapsed_seconds:.1f}s and {result.attempts} attempts: "
             f"{', '.join(result.model_ids)}"
         )
+        _echo_openai_base_url(selected_url)
     except RunpodVllmError as exc:
         _fail(exc)
 
@@ -693,6 +745,7 @@ def smoke_test_command(
         usage = data.get("usage")
         suffix = f" Usage: {json.dumps(usage, sort_keys=True)}" if isinstance(usage, dict) else ""
         typer.echo(f"Smoke test passed.{suffix}")
+        _echo_openai_base_url(selected_url)
     except RunpodVllmError as exc:
         _fail(exc)
 

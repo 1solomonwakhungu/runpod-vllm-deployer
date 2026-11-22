@@ -193,6 +193,66 @@ def test_v2_payload_volume_rules_and_v1_default_unchanged() -> None:
     assert v1["imageName"] and v1["volumeInGb"] == 40 and "image" not in v1
 
 
+@pytest.mark.parametrize(
+    ("gpu", "expected_id"),
+    [
+        ("RTX4090", "NVIDIA GeForce RTX 4090"),
+        ("RTX5090", "NVIDIA GeForce RTX 5090"),
+        ("A6000", "NVIDIA RTX A6000"),
+    ],
+)
+def test_v2_payload_supports_consumer_and_workstation_gpu_profiles(
+    gpu: str, expected_id: str
+) -> None:
+    payload = build_pod_payload(DeploymentConfig(model="org/model", gpu=gpu), ApiVersion.V2)
+    assert not V1_ONLY_KEYS & payload.keys()
+    assert payload["gpu"]["id"] == expected_id
+
+
+def test_v2_plan_and_deploy_support_gpu_type_id_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("runpod_vllm.cli.RunPodClient", FakeClient)
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-api-key")
+
+    plan = runner.invoke(
+        app,
+        [
+            "--api-version",
+            "v2",
+            "plan",
+            "--model",
+            "org/model",
+            "--gpu-type-id",
+            "NVIDIA GeForce RTX 5090",
+        ],
+    )
+    assert plan.exit_code == 0, plan.output
+    assert "REST v2" in plan.output
+    assert '"id": "NVIDIA GeForce RTX 5090"' in plan.output
+
+    state_path = tmp_path / "state.json"
+    deploy = runner.invoke(
+        app,
+        [
+            "--state-path",
+            str(state_path),
+            "--api-version",
+            "v2",
+            "deploy",
+            "--model",
+            "org/model",
+            "--gpu-type-id",
+            "NVIDIA RTX PRO 6000",
+            "--yes",
+        ],
+    )
+    assert deploy.exit_code == 0, deploy.output
+    assert FakeClient.created_payload is not None
+    assert not V1_ONLY_KEYS & FakeClient.created_payload.keys()
+    assert FakeClient.created_payload["gpu"]["id"] == "NVIDIA RTX PRO 6000"
+
+
 def test_normalize_pod_for_both_versions() -> None:
     v1 = normalize_pod(
         {"id": "a", "name": "n", "desiredStatus": "EXITED", "gpuCount": 1}, ApiVersion.V1

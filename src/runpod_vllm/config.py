@@ -44,6 +44,9 @@ def default_api_version(today: date) -> ApiVersion:
 
 
 GPU_PROFILES: dict[str, str] = {
+    "RTX4090": "NVIDIA GeForce RTX 4090",
+    "RTX5090": "NVIDIA GeForce RTX 5090",
+    "A6000": "NVIDIA RTX A6000",
     "A40": "NVIDIA A40",
     "L40S": "NVIDIA L40S",
     "A100": "NVIDIA A100-SXM4-80GB",
@@ -56,6 +59,7 @@ _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0
 _REVISION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 _DATA_CENTER_PATTERN = re.compile(r"^[A-Z]{2,3}-[A-Z0-9]{2,4}-[0-9]{1,2}$")
 _ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_GPU_TYPE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()/-]{1,119}$")
 
 
 def sanitize_name(value: str) -> str:
@@ -140,13 +144,23 @@ class DeploymentConfig:
     data_centers: tuple[str, ...] = ()
     port: int = 8000
     environment: dict[str, str] = field(default_factory=dict)
+    gpu_type_id_override: str | None = None
 
     def validated(self) -> DeploymentConfig:
         if not _MODEL_PATTERN.fullmatch(self.model):
             raise ConfigurationError("Model must be a valid Hugging Face model ID.")
         if self.revision and not _REVISION_PATTERN.fullmatch(self.revision):
             raise ConfigurationError("Revision contains unsupported characters.")
-        if self.gpu not in GPU_PROFILES:
+        if self.gpu_type_id_override is not None:
+            if (
+                self.gpu_type_id_override != self.gpu_type_id_override.strip()
+                or not _GPU_TYPE_ID_PATTERN.fullmatch(self.gpu_type_id_override)
+            ):
+                raise ConfigurationError(
+                    "GPU type ID override must be 2 to 120 printable ASCII characters with no "
+                    "leading or trailing whitespace."
+                )
+        elif self.gpu not in GPU_PROFILES:
             choices = ", ".join(GPU_PROFILES)
             raise ConfigurationError(
                 f"Unsupported GPU profile {self.gpu!r}. Choose from: {choices}."
@@ -191,4 +205,6 @@ class DeploymentConfig:
 
     @property
     def gpu_type_id(self) -> str:
+        if self.gpu_type_id_override is not None:
+            return self.gpu_type_id_override
         return GPU_PROFILES[self.gpu]

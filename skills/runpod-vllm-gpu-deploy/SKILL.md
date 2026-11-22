@@ -63,7 +63,7 @@ Place global options before the command:
 | `--state-path PATH` | Local teardown state; default `.runpod-vllm-state.json`. |
 | `--env-file PATH` | Optional selected file containing `RUNPOD_API_KEY` and `HF_TOKEN`. |
 | `--api-url TEXT` | RunPod REST base URL; default `https://rest.runpod.io/v1` for v1, `https://api.runpod.io/v2` for v2, or the URL recorded in state. |
-| `--api-version [v1\|v2]` | RunPod REST API version; default is the version recorded in state, else `v1` before 2026-11-15 and `v2` from that date; env var `RUNPOD_API_VERSION`. |
+| `--api-version [v1\|v2]` | RunPod REST API version; defaults to `v2` (since RunPod retired v1 on 2026-11-15) or the version recorded in state (legacy v1 state moves to v2 automatically); env var `RUNPOD_API_VERSION`. |
 | `--version` | Show the version and exit. |
 | `--help` | Show help and exit. |
 
@@ -71,12 +71,12 @@ Use these exact command forms and options:
 
 | Command | Exact form | Command options from current help | Network and effect |
 | --- | --- | --- | --- |
-| `plan` | `runpod-vllm plan --model TEXT [OPTIONS]` | `--model`, `--name`, `--gpu`, `--gpu-count`, `--tensor-parallel-size`, `--container-disk-gb`, `--volume-gb`, `--min-vcpu-per-gpu`, `--min-ram-per-gpu`, `--max-model-len`, `--gpu-memory-utilization`, `--dtype`, `--quantization`, `--kv-cache-dtype`, `--revision`, `--trust-remote-code`, `--reasoning-parser`, `--image`, `--cloud-type`, `--data-center`, `--port`, `--env`, `--help` | Offline; validates and prints a redacted payload. |
+| `plan` | `runpod-vllm plan --model TEXT [OPTIONS]` | `--model`, `--name`, `--gpu`, `--gpu-type-id`, `--gpu-count`, `--tensor-parallel-size`, `--container-disk-gb`, `--volume-gb`, `--min-vcpu-per-gpu`, `--min-ram-per-gpu`, `--max-model-len`, `--gpu-memory-utilization`, `--dtype`, `--quantization`, `--kv-cache-dtype`, `--revision`, `--trust-remote-code`, `--reasoning-parser`, `--image`, `--cloud-type`, `--data-center`, `--port`, `--env`, `--help` | Offline; validates and prints a redacted payload. |
 | `deploy` | `runpod-vllm deploy --model TEXT [OPTIONS]` | All `plan` options, plus `--yes` or `-y`; `--env` is never printed unredacted. | RunPod API; creates a billable GPU Pod and saves state. |
 | `list` | `runpod-vllm list` | `--help` | RunPod API; lists active GPU Pods without mutation. |
 | `status` | `runpod-vllm status` | `--help` | RunPod API; inspects the state-recorded Pod and shows URLs. |
-| `wait` | `runpod-vllm wait [OPTIONS]` | `--base-url TEXT`, `--timeout FLOAT` default `900.0`, `--interval FLOAT` default `5.0`, `--help` | vLLM endpoint; waits for `/health` and non-empty `/v1/models`. |
-| `smoke-test` | `runpod-vllm smoke-test [OPTIONS]` | `--base-url TEXT`, `--model TEXT`, `--bearer-token-env TEXT` default `VLLM_API_KEY`, `--timeout FLOAT` default `30.0`, `--help` | vLLM endpoint; sends a deterministic four-token chat request. |
+| `wait` | `runpod-vllm wait [OPTIONS]` | `--base-url TEXT`, `--timeout FLOAT` default `900.0`, `--interval FLOAT` default `5.0`, `--help` | vLLM endpoint; waits for `/health` and non-empty `/v1/models`, then prints a redacted `OpenAI base URL` and `export OPENAI_BASE_URL=...` snippet. |
+| `smoke-test` | `runpod-vllm smoke-test [OPTIONS]` | `--base-url TEXT`, `--model TEXT`, `--bearer-token-env TEXT` default `VLLM_API_KEY`, `--timeout FLOAT` default `30.0`, `--help` | vLLM endpoint; sends a deterministic four-token chat request, then prints a redacted `OpenAI base URL` and `export OPENAI_BASE_URL=...` snippet. |
 | `destroy` | `runpod-vllm destroy [OPTIONS]` | `--pod-id TEXT`, `--yes` or `-y`, `--verify-timeout FLOAT` default `60.0`, `--verify-interval FLOAT` default `2.0`, `--help` | RunPod API; deletes, verifies absence, then removes matching state. |
 
 `plan` and `deploy` share these validated defaults and constraints:
@@ -85,7 +85,8 @@ Use these exact command forms and options:
 | --- | --- |
 | `--model TEXT` | Required Hugging Face model ID. |
 | `--name TEXT` | `vllm-server`; sanitized to at most 63 characters. |
-| `--gpu TEXT` | `A40`; allowed profiles are `A40`, `L40S`, `A100`, `H100`, `H200`, `B200`. |
+| `--gpu TEXT` | `A40`; allowed profiles are `RTX4090`, `RTX5090`, `A6000`, `A40`, `L40S`, `A100`, `H100`, `H200`, `B200`. |
+| `--gpu-type-id TEXT` | Optional raw RunPod GPU type ID (2 to 120 printable ASCII characters, no leading or trailing whitespace); overrides `--gpu` when set. |
 | `--gpu-count INTEGER` | `1`; range 1 through 8. |
 | `--tensor-parallel-size INTEGER` | `1`; range 1 through 8, no greater than GPU count, and must divide GPU count. |
 | `--container-disk-gb INTEGER` | `50`; validated range 10 through 4096. |
@@ -121,13 +122,13 @@ runpod-vllm destroy --help
 
 ## RunPod REST API version
 
-RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on 2026-11-15. REST API v2 (`https://api.runpod.io/v2`) is the long-term surface. The CLI defaults to v1 until 2026-11-15 and switches to v2 automatically on that date.
+RunPod retired REST API v1 (`https://rest.runpod.io/v1`) on 2026-11-15. REST API v2 (`https://api.runpod.io/v2`) is the current surface and the automatic CLI default since 2026-11-15.
 
-- Use `--api-version v2` (a global option, placed before the command) or set `RUNPOD_API_VERSION=v2` when the user asks for v2 before 2026-11-15. From that date v2 is the default and no option is needed.
-- Run `plan` with the same `--api-version` before `deploy`; the v2 payload uses nested `gpu`, `image`, `disk`, `entrypoint`, `cloud`, and `mounts` fields.
+- New deployments default to `v2` (`https://api.runpod.io/v2`), so no `--api-version` flag is needed. You can still pass `--api-version` (a global option, placed before the command) or set `RUNPOD_API_VERSION` when targeting a custom endpoint.
+- Run `plan` before `deploy`; the v2 payload uses nested `gpu`, `image`, `disk`, `entrypoint`, `cloud`, and `mounts` fields.
 - With v2, `--volume-gb` must be `0` or at least `10`.
-- `deploy` records `api_version` in state. `status` and `destroy` reuse it unless `--api-version` is passed. State files without the field are v1 deployments.
-- After v1 retirement, `status` and `destroy` move an older v1 deployment to v2 automatically; the Pod ID is unchanged. Do not pass `--api-version v1` after that date.
+- `deploy` records `api_version` in state. `status` and `destroy` reuse it unless `--api-version` is passed, and automatically move legacy v1 state files (including files written without `api_version`) to v2 using the same Pod ID.
+- Do not pass `--api-version v1` against RunPod now that v1 is retired.
 - `--api-url` does not change the version. Pair a custom v2 URL with `--api-version v2`.
 
 ## Plan-first workflow
