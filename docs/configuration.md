@@ -7,23 +7,23 @@ Global options must appear before the command:
 | `--state-path PATH` | `.runpod-vllm-state.json` | Select local teardown state |
 | `--env-file PATH` | None | Load secrets from a user-selected env file |
 | `--api-url TEXT` | Version default, or the URL in state | Override the RunPod REST base URL |
-| `--api-version [v1\|v2]` | `v1`, or the version in state | Select the RunPod REST API version; also read from `RUNPOD_API_VERSION` |
+| `--api-version [v1\|v2]` | `v2` (since 2026-11-15), or the version in state | Select the RunPod REST API version; also read from `RUNPOD_API_VERSION` |
 | `--version` | | Print the CLI version |
 
 ## RunPod REST API version
 
-RunPod deprecated REST API v1 (`https://rest.runpod.io/v1`) and retires it on **2026-11-15**. REST API v2 (`https://api.runpod.io/v2`) replaces it. Until then the CLI defaults to v1 so current behavior is unchanged; from 2026-11-15 the default switches to v2 automatically, with no upgrade needed. To opt in to v2 earlier:
+RunPod retired REST API v1 (`https://rest.runpod.io/v1`) on **2026-11-15**. REST API v2 (`https://api.runpod.io/v2`) is the current surface and the automatic CLI default from 2026-11-15 onward, so no `--api-version` flag is needed for normal RunPod usage. You can still set `--api-version` or `RUNPOD_API_VERSION` explicitly when targeting a custom endpoint:
 
 ```bash
-runpod-vllm --api-version v2 plan --model Qwen/Qwen3-8B
-export RUNPOD_API_VERSION=v2   # applies to every later command in this shell
+runpod-vllm plan --model Qwen/Qwen3-8B
+export RUNPOD_API_VERSION=v2   # explicit opt-in if desired
 ```
 
 How the version and URL are chosen:
 
 1. An explicit `--api-version` (or `RUNPOD_API_VERSION`) wins. An explicit `--api-url` wins for the URL.
-2. Otherwise `status` and `destroy` reuse the `api_version` and `api_url` recorded in the state file by `deploy`. State files written before v2 support have no `api_version` and are read as v1.
-3. Otherwise the CLI uses v1 and `https://rest.runpod.io/v1`. Selecting v2 without `--api-url` uses `https://api.runpod.io/v2`.
+2. Otherwise `status` and `destroy` reuse the `api_version` and `api_url` recorded in the state file by `deploy`. Since 2026-11-15, legacy v1 state files (including files written without `api_version`) automatically move to v2 using the same Pod ID.
+3. Otherwise new deployments use v2 and `https://api.runpod.io/v2` (before 2026-11-15 the automatic default was v1 and `https://rest.runpod.io/v1`).
 
 `--api-url` does not change the version. Pair a custom v2-compatible URL with `--api-version v2`.
 
@@ -50,7 +50,8 @@ v2 rejects unknown fields, so the v1-only `computeType`, `gpuTypePriority`, `dat
 | --- | --- | --- |
 | `--model TEXT` | Required | Hugging Face `ORG/MODEL` or model ID |
 | `--name TEXT` | `vllm-server` | Lowercased and sanitized to 63 characters |
-| `--gpu TEXT` | `A40` | `A40`, `L40S`, `A100`, `H100`, `H200`, or `B200` |
+| `--gpu TEXT` | `A40` | `RTX4090`, `RTX5090`, `A6000`, `A40`, `L40S`, `A100`, `H100`, `H200`, or `B200` |
+| `--gpu-type-id TEXT` | None | Raw RunPod GPU type ID (2 to 120 printable ASCII characters, no leading/trailing whitespace); overrides `--gpu` |
 | `--gpu-count INTEGER` | `1` | From 1 through 8 |
 | `--tensor-parallel-size INTEGER` | `1` | Must divide GPU count |
 | `--container-disk-gb INTEGER` | `50` | Ephemeral container disk |
@@ -94,6 +95,36 @@ runpod-vllm plan \
 
 RunPod data center availability changes. Consult the current RunPod API documentation before restricting placement.
 
+## GPU profiles and custom GPU type IDs
+
+Built-in `--gpu` profiles map short names to RunPod GPU type IDs:
+
+| Profile | RunPod GPU type ID |
+| --- | --- |
+| `RTX4090` | `NVIDIA GeForce RTX 4090` |
+| `RTX5090` | `NVIDIA GeForce RTX 5090` |
+| `A6000` | `NVIDIA RTX A6000` |
+| `A40` | `NVIDIA A40` |
+| `L40S` | `NVIDIA L40S` |
+| `A100` | `NVIDIA A100-SXM4-80GB` |
+| `H100` | `NVIDIA H100 80GB HBM3` |
+| `H200` | `NVIDIA H200` |
+| `B200` | `NVIDIA B200` |
+
+To target any other RunPod GPU SKU without waiting for a new built-in profile, pass `--gpu-type-id` with the exact RunPod GPU type identifier:
+
+```bash
+runpod-vllm plan \
+  --model ORG/MODEL \
+  --gpu-type-id "NVIDIA RTX PRO 6000"
+```
+
+`--gpu-type-id` overrides `--gpu` and is validated to 2 through 120 printable ASCII characters (`A-Z`, `a-z`, `0-9`, spaces, and `._+()/-`) with no leading or trailing whitespace.
+
 ## Model sizing
 
 GPU profile support means the CLI knows the RunPod GPU type identifier. It is not a claim that a given checkpoint fits. Confirm weight size, quantization overhead, KV cache requirements, context length, dtype support, and tensor parallel requirements from primary model and vLLM documentation.
+
+## OpenAI client output
+
+When `wait` or `smoke-test` succeeds, the CLI prints the normalized OpenAI-compatible base URL (`.../v1`) along with a shell-quoted `export OPENAI_BASE_URL=...` snippet ready to copy into your terminal or OpenAI SDK configuration. If a custom `--base-url` contains embedded credentials (userinfo or sensitive query parameters), those values are redacted before printing and a note warns you to re-enter the original URL from your environment.
