@@ -1,15 +1,17 @@
 import { CopyButton } from "@/components/copy-button";
 import { cn } from "@/lib/utils";
 
-/** A copyable shell snippet. Each line gets a "$" prompt unless it continues the previous one. */
+/** A copyable code or shell snippet. Shell snippets add a "$" prompt unless a line continues the previous one. */
 export function CommandBlock({
   command,
   label,
   className,
+  prompt = true,
 }: {
   command: string;
   label: string;
   className?: string;
+  prompt?: boolean;
 }) {
   const lines = command.split("\n");
   return (
@@ -29,10 +31,12 @@ export function CommandBlock({
             const continued = i > 0 && lines[i - 1].trimEnd().endsWith("\\");
             return (
               <span key={i} className="block whitespace-pre">
-                <span aria-hidden className="text-lime-400/80 select-none">
-                  {continued ? "  " : "$ "}
-                </span>
-                {line}
+                {prompt && (
+                  <span aria-hidden className="text-lime-400/80 select-none">
+                    {continued ? "  " : "$ "}
+                  </span>
+                )}
+                {line || " "}
               </span>
             );
           })}
