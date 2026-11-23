@@ -1,6 +1,6 @@
 # Landing page
 
-Static site for RunPod vLLM Deployer, published at <https://runpod-vllm-deployer.vercel.app>.
+Static site for RunPod vLLM Deployer, published at <https://vllm.harlo.dev>.
 
 Vite, React, Tailwind CSS v4 and shadcn/ui components. Dark theme only. The build output in `dist/` is plain static files.
 

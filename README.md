@@ -8,7 +8,7 @@
 
 A lightweight Python CLI (`httpx` + `typer`, zero daemon, zero SSH) and portable AI Agent Skill built for RunPod REST API v2. Plan offline, confirm before anything billable, verify `/health` + `/v1/models` + a deterministic chat smoke test, and confirm the Pod is actually gone before local state is removed.
 
-[Project Site](https://runpod-vllm-deployer.vercel.app) | [Quickstart](docs/quickstart.md) | [Configuration](docs/configuration.md) | [Security Model](docs/security.md) | [Agent Skill](https://skills.sh/1solomonwakhungu/runpod-vllm-deployer)
+[Project Site](https://vllm.harlo.dev) | [Quickstart](docs/quickstart.md) | [Configuration](docs/configuration.md) | [Security Model](docs/security.md) | [Agent Skill](https://skills.sh/1solomonwakhungu/runpod-vllm-deployer)
 
 > **Billing note:** RunPod GPU Pods are billable until terminated. Review [RunPod's live GPU pricing](https://www.runpod.io/pricing) before confirming a deploy.
 
